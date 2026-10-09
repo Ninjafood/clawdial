@@ -1275,6 +1275,8 @@ class Handler(BaseHTTPRequestHandler):
             ok, msg = update_tools(str(b.get("agent", "")), b.get("profile") or "")
             return self._send(200 if ok else 400, {"ok": ok, "msg": msg})
         if path == "/api/gateway/restart":
+            if agents_busy() and not b.get("force"):
+                return self._send(409, {"ok": False, "busy": True, "msg": "an agent is mid-turn; restarting now would drop its reply"})
             ok, msg = gateway_restart()
             return self._send(200 if ok else 500, {"ok": ok, "msg": msg})
         if path == "/api/session/reset":
