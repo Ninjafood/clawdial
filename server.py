@@ -41,6 +41,8 @@ DEFAULTS = {
         "100.64.0.0/10", "fd7a:115c:a1e0::/48",            # Tailscale
     ],
     "backend_hint": {},                                    # provider id -> unsloth|lmstudio|ollama|generic (optional)
+    "gateway_restart_cmd": "",                             # optional shell command to restart the gateway (e.g. systemctl --user restart openclaw)
+    "gateway_launchd_label": "ai.openclaw.gateway",       # macOS fallback when the openclaw CLI refuses
 }
 
 
@@ -794,7 +796,17 @@ def sessions_view(fresh=False):
 
 
 def gateway_restart():
-    rc, out = run_oc(["gateway", "restart"], timeout=120)
+    """Restart the gateway: a custom command if configured, else the openclaw CLI, else the macOS LaunchAgent directly."""
+    custom = CFG.get("gateway_restart_cmd")
+    if custom:
+        r = subprocess.run(custom, shell=True, capture_output=True, text=True, timeout=120, env={**os.environ, "PATH": ENV_PATH})
+        rc, out = r.returncode, (r.stdout + r.stderr).strip()
+    else:
+        rc, out = run_oc(["gateway", "restart"], timeout=120)
+        if rc != 0 and sys.platform == "darwin":
+            label = CFG.get("gateway_launchd_label", "ai.openclaw.gateway")
+            r = subprocess.run(["launchctl", "kickstart", "-k", "gui/%d/%s" % (os.getuid(), label)], capture_output=True, text=True, timeout=60)
+            rc, out = r.returncode, (r.stdout + r.stderr).strip() or out
     if rc != 0:
         log_event("❌ Gateway restart failed: %s" % out[-160:])
         return False, out[-300:]
