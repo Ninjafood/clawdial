@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Model Control</title>
+<link rel="icon" href="data:,">
+<style>
+:root{
+  --bg:#f2f2f7;--side:#ececf1;--group:#ffffff;--ink:#1c1c1e;--sec:#6e6e73;--ter:#aeaeb2;--sep:#e5e5ea;
+  --accent:#0a66ff;--accent-ink:#fff;--ok:#34c759;--warn:#ff9f0a;--bad:#ff3b30;--ctl:#f2f2f7;--ctl-b:#d9d9de;--sel:#dcdce3;
+  --radius:10px;--shadow:0 0 0 .5px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.04);
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#1c1c1e;--side:#232326;--group:#2c2c2e;--ink:#f2f2f7;--sec:#98989d;--ter:#636366;--sep:#3a3a3c;
+  --accent:#3b82f6;--ok:#30d158;--warn:#ffd60a;--bad:#ff453a;--ctl:#3a3a3c;--ctl-b:#48484a;--sel:#3a3a3c;--shadow:0 0 0 .5px rgba(255,255,255,.06);
+}}
+*{box-sizing:border-box}html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:13px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--accent)}
+.app{display:grid;grid-template-columns:232px minmax(0,1fr);min-height:100vh}
+aside{background:var(--side);border-right:1px solid var(--sep);padding:14px 10px;position:sticky;top:0;height:100vh;overflow:auto}
+.brand{display:flex;align-items:center;gap:10px;padding:6px 8px 14px}
+.brand .logo{width:34px;height:34px;border-radius:9px;background:linear-gradient(145deg,#4f7cff,#2d4fd6);display:grid;place-items:center;color:#fff;font-size:18px;box-shadow:var(--shadow)}
+.brand b{display:block;font-size:14px}.brand small{display:block;color:var(--sec);font-size:11.5px}
+.nav button{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;text-align:left;padding:6px 8px;border-radius:7px;cursor:pointer;color:var(--ink)}
+.nav button.on{background:var(--accent);color:#fff}
+.nav .ic{width:24px;height:24px;border-radius:6px;display:grid;place-items:center;font-size:13px;color:#fff;flex:none}
+.nav button.on .ic{box-shadow:inset 0 0 0 1px rgba(255,255,255,.25)}
+.status{margin-top:14px;padding:8px;border-top:1px solid var(--sep)}
+.status .st{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;color:var(--sec)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--ter);flex:none}.dot.ok{background:var(--ok)}.dot.bad{background:var(--bad)}.dot.warn{background:var(--warn)}
+main{padding:28px 40px 80px;max-width:860px;width:100%;min-width:0;overflow-x:hidden}
+.mono,.sub{overflow-wrap:anywhere}
+select{max-width:min(100%,420px)}
+.rl{min-width:0}
+@media (max-width:760px){select,input[type=text]{width:100%;min-width:0}.rc .btn{flex:1 1 auto}}
+h1{font-size:24px;font-weight:700;margin:0 0 6px;letter-spacing:-.01em}
+.lead{color:var(--sec);margin:0 0 22px;max-width:640px}
+.gh{font-size:12px;font-weight:600;color:var(--sec);text-transform:none;margin:22px 10px 6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.gh .tag{max-width:100%;overflow-wrap:anywhere;white-space:normal}
+@media (max-width:760px){.gh .tag.mono{display:none}.gh .btn{flex:1 1 auto}}
+.gh:first-of-type{margin-top:0}
+.gh .sp{flex:1}
+.group{background:var(--group);border-radius:var(--radius);box-shadow:var(--shadow);overflow:hidden}
+.row{display:flex;align-items:center;gap:14px;padding:10px 14px;min-height:46px}
+.row+.row{border-top:1px solid var(--sep)}
+.rl{flex:1;min-width:140px}.rl b{font-weight:500}.rl .sub{color:var(--sec);font-size:12px;margin-top:1px}
+.rc{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;max-width:62%;min-width:0}
+.rc.full{max-width:100%;flex:1;justify-content:flex-start}
+.foot{color:var(--sec);font-size:11.5px;line-height:1.45;margin:6px 14px 0;max-width:680px}
+.foot b{font-weight:600;color:var(--ink)}
+select,input[type=text],input[type=number],input[type=time],textarea{background:var(--ctl);border:1px solid var(--ctl-b);border-radius:6px;padding:5px 8px;min-height:28px}
+select{appearance:none;-webkit-appearance:none;padding-right:26px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='14' viewBox='0 0 10 14'%3E%3Cpath d='M1 5l4-4 4 4M1 9l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 8px center;max-width:100%}
+input[type=number]{width:104px}input[type=text]{min-width:160px}
+textarea{width:100%;min-height:54px;resize:vertical}
+.btn{border:1px solid var(--ctl-b);background:var(--group);border-radius:6px;padding:5px 12px;cursor:pointer;min-height:28px;white-space:nowrap}
+.btn.primary{background:var(--accent);border-color:transparent;color:var(--accent-ink)}
+.btn.danger{color:var(--bad)}.btn:disabled{opacity:.5;cursor:wait}
+.sw{position:relative;width:38px;height:22px;flex:none}.sw input{opacity:0;width:0;height:0;position:absolute}
+.sw i{position:absolute;inset:0;background:var(--ctl-b);border-radius:11px;transition:.15s}
+.sw i:after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,0,.25);transition:.15s}
+.sw input:checked+i{background:var(--ok)}.sw input:checked+i:after{transform:translateX(16px)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.chip{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:99px;background:var(--ctl);border:1px solid var(--ctl-b);font-size:12px;cursor:pointer;user-select:none}
+.chip input{margin:0}.chip.on{background:var(--accent);border-color:transparent;color:#fff}
+.tag{display:inline-block;font-size:11px;padding:1px 7px;border-radius:99px;background:var(--ctl);color:var(--sec);margin-left:6px;vertical-align:middle}
+.tag.ok{color:var(--ok)}.tag.bad{color:var(--bad)}.tag.warn{color:var(--warn)}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:12px}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--sep)}
+.kv>div{background:var(--group);padding:12px 14px}.kv .k{color:var(--sec);font-size:11.5px}.kv .v{font-size:17px;font-weight:600;margin-top:2px}
+.tbl{width:100%;border-collapse:collapse}.tbl td,.tbl th{padding:9px 14px;text-align:left;vertical-align:middle}.tbl tr+tr td{border-top:1px solid var(--sep)}.tbl th{font-size:11.5px;color:var(--sec);font-weight:600;border-bottom:1px solid var(--sep)}
+.muted{color:var(--sec)}.ok-t{color:var(--ok)}.bad-t{color:var(--bad)}.warn-t{color:var(--warn)}
+details.help{margin-top:22px}details.help summary{cursor:pointer;color:var(--sec);font-size:12px;font-weight:600;margin:0 10px 6px;list-style:none}details.help summary:before{content:"▸ ";}details.help[open] summary:before{content:"▾ "}
+.help .row{align-items:flex-start}.help .rl{min-width:120px;max-width:170px}.help .rc{max-width:100%;flex:1;justify-content:flex-start;color:var(--sec)}
+/* swipeable tiles */
+.tiles{display:flex;flex-direction:column;gap:10px}
+.tile{position:relative;overflow:hidden;border-radius:var(--radius);box-shadow:var(--shadow);background:var(--group)}
+.tile .acts{position:absolute;top:0;bottom:0;right:0;display:flex}
+.tile .acts button{width:72px;border:0;color:#fff;font-size:22px;cursor:pointer;display:grid;place-items:center;gap:2px}
+.tile .acts button small{font-size:10.5px;font-weight:600;letter-spacing:.02em}
+.tile .acts .m{background:var(--accent)}.tile .acts .x{background:var(--bad)}
+.tile .fg{position:relative;background:var(--group);padding:12px 14px;display:flex;align-items:center;gap:12px;touch-action:pan-y;user-select:none;-webkit-user-select:none;will-change:transform;cursor:grab}
+.tile .fg.drag{transition:none}.tile .fg{transition:transform .22s cubic-bezier(.2,.8,.2,1)}
+.tile .av{width:40px;height:40px;border-radius:10px;background:var(--ctl);display:grid;place-items:center;font-size:20px;flex:none}
+.tile .tx{flex:1;min-width:0}.tile .tx b{display:block;font-weight:600}.tile .tx .sub{color:var(--sec);font-size:12px}
+.tile .tg{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:52%}
+.tile .hint{color:var(--ter);font-size:16px;flex:none;margin-left:4px}
+/* modal */
+.ov{position:fixed;inset:0;background:rgba(0,0,0,.38);display:flex;align-items:center;justify-content:center;z-index:20;padding:16px;backdrop-filter:blur(2px)}
+.sheet{background:var(--bg);border-radius:14px;width:min(540px,100%);max-height:88vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+.sheet .hd{display:flex;align-items:center;gap:10px;padding:14px 16px;border-bottom:1px solid var(--sep);position:sticky;top:0;background:var(--bg);z-index:1}
+.sheet .hd b{font-size:15px;flex:1}.sheet .bd{padding:14px 16px}.sheet .group{margin-bottom:12px}
+.sheet .ft{display:flex;gap:8px;justify-content:flex-end;padding:0 16px 16px}
+@media (max-width:760px){.ov{align-items:flex-end;padding:0}.sheet{width:100%;border-radius:16px 16px 0 0;max-height:92vh}.tile .fg{flex-wrap:wrap}.tile .tx{flex:1 1 60%}.tile .tg{flex:0 0 100%;max-width:100%;justify-content:flex-start;padding-left:52px;margin-top:-4px}.tile .hint{order:2;margin-left:auto}.tile .tx .mono{overflow-wrap:break-word;word-break:break-all}}
+#toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(10px);background:var(--ink);color:var(--bg);padding:9px 16px;border-radius:10px;opacity:0;transition:.2s;pointer-events:none;max-width:90vw;font-size:13px;z-index:9}
+#toast.show{opacity:.96;transform:translateX(-50%)}
+.login{max-width:360px;margin:14vh auto;padding:0 16px}.login .group{padding:18px}.login input{width:100%;margin:12px 0}
+.inline{display:none;padding:10px 14px;border-top:1px solid var(--sep);background:var(--ctl)}.inline.show{display:block}
+.inline .f{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.pb{height:6px;background:var(--ctl);border-radius:3px;overflow:hidden;width:120px}.pb i{display:block;height:100%;background:var(--accent)}
+@media (max-width:760px){
+  .app{grid-template-columns:1fr}aside{position:static;height:auto;border-right:0;border-bottom:1px solid var(--sep);padding:10px 12px}
+  .brand{padding-bottom:8px}.nav{display:flex;gap:4px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}.nav button{width:auto;white-space:nowrap;padding:6px 10px}
+  .status{display:flex;gap:12px;margin-top:6px;padding:6px 0 0;border-top:0}
+  main{padding:18px 16px 60px}h1{font-size:21px}
+  .row{flex-wrap:wrap}.rc{max-width:100%;width:100%;justify-content:flex-start}.chips{justify-content:flex-start}.help .rl{max-width:100%}
+}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="toast"></div>
+<script>
+'use strict';
+const $=s=>document.querySelector(s);const qa=s=>[...document.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const kid=r=>String(r).replace(/[^a-zA-Z0-9]/g,'_');
+const shortName=ref=>{const i=ref.indexOf('/');const p=ref.slice(0,i),id=ref.slice(i+1);return `${p} · ${id.startsWith(p+'/')?id.slice(p.length+1):id}`};
+const fmt=n=>n==null||n===''?'—':Number(n).toLocaleString();
+const S={tab:'overview',d:null,busy:false};
+try{S.tab=localStorage.getItem('mc_tab')||'overview'}catch(e){}
+
+const TABS=[
+ ['overview','Overview','🏠','#5856d6'],['agents','Agents','🤖','#ff9500'],['models','Models & Context','🧠','#af52de'],
+ ['gpu','Servers','🖥️','#34c759'],['sched','Schedules','🗓️','#ff2d55'],['health','Health & Speed','❤️','#ff3b30'],['log','Change Log','📜','#8e8e93']];
+
+const HELP={
+ context:['Context','How much conversation (in tokens, roughly ¾ of a word each) OpenClaw sends to the model each turn. Bigger = remembers more, but every turn is slower, because the model re-reads it all. Keep it at or below what the server actually loaded — see Servers — or requests fail.'],
+ maxout:['Max output','The longest reply a model may write in one turn. 2,048–4,096 is plenty for chat; raise it only for long documents.'],
+ fallback:['Fallbacks','Tried in order only when the main model <b>errors</b> (desktop off, server crashed). Not used when the main model is merely slow.'],
+ thinking:['Thinking level','How much the model reasons before answering. Higher = better on hard questions, slower on every question. "Off" is fastest; leave blank to use OpenClaw\'s default (medium).'],
+ budget:['Prompt budget','Max characters of an agent\'s instruction files (SOUL.md, AGENTS.md, USER.md…) injected each turn. Smaller = faster first word, but long instructions get cut off. Blank uses OpenClaw\'s default.'],
+ ttft:['First word (TTFT)','Time before the first word appears. On a long OpenClaw turn this is mostly the server re-reading the prompt, so a bigger model or a longer conversation means a longer wait. The test here uses a tiny prompt, so real turns are slower.'],
+ tps:['tok/s','Writing speed once the model starts. Roughly: small models fly, big models crawl, and anything above ~15 tok/s feels fine to read.'],
+ quant:['Quant','How compressed the model file is. Q4_K_M / UD-Q4_K_XL ≈ 4-bit, a good balance. Q8 = bigger and slightly better. IQ3 and below = very compressed, noticeably worse. Always check memory before loading something near your GPU\'s limit — a model that doesn\'t fit can crash the server.'],
+ current:['unsloth/current','Unsloth Studio answers any model name with whatever is loaded, so an entry called <span class="mono">current</span> means "whatever is loaded right now". Agents using it follow along when you load something else. Its context number is what OpenClaw uses; the panel keeps it in step with what the server loaded.'],
+ tools:['Tool access','What an agent is allowed to do. <b>minimal</b> — chat only. <b>messaging</b> — chat plus sending messages on your channels. <b>coding</b> — files, shell and web on the gateway machine (no messaging). <b>full</b> — everything. Blank inherits the global setting (full). Agents with shell access can read anything on that machine, so keep it to agents you trust with it.'],
+ conv:['Conversation size','Each agent keeps a running conversation (its main session). Every turn re-sends it, so it grows until OpenClaw compacts it. If it grows past the model\'s context — or you switch the agent to a model with a smaller context — every reply fails with no text. Reset starts a fresh conversation (file memory is kept); Compact asks the model to summarise it.'],
+ copy:['Copy with different context','Unsloth Studio answers any model name with the loaded model, so a copy like unsloth/current-32k is just a second entry with a smaller context. Assign it to a chatty agent to keep turns fast. Other servers check the model name, so copies only work for Unsloth.'],
+};
+function helpGroup(keys){return `<details class="help"><summary>What do these mean?</summary><div class="group">${keys.map(k=>`<div class="row"><div class="rl"><b>${HELP[k][0]}</b></div><div class="rc">${HELP[k][1]}</div></div>`).join('')}</div></details>`}
+
+function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),3800)}
+async function api(path,body){const o=body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json','X-Model-UI':'1'},body:JSON.stringify(body)};
+ const r=await fetch(path,o);let j={};try{j=await r.json()}catch(e){}
+ if(r.status===401&&path!=='/api/login'){renderLogin();throw new Error('login required')}
+ if(!r.ok&&!j.msg&&!j.error)j.error='HTTP '+r.status;return j}
+async function boot(){const me=await api('/api/me');if(!me.authed)return renderLogin();await refresh()}
+async function refresh(){S.d=await api('/api/state');render();if(!S.d.sessions){await loadSessions(false);render()}}
+function renderLogin(){$('#app').innerHTML=`<div class="login"><div class="group"><div class="brand" style="padding:0 0 10px"><div class="logo">♜</div><div><b>Model Control</b><small>for OpenClaw</small></div></div>
+ <div class="muted">Sign in to change which models your agents use.</div><input id="pw" type="password" placeholder="Password" autofocus><button class="btn primary" id="lg" style="width:100%">Sign In</button><div id="le" class="bad-t" style="margin-top:8px"></div></div></div>`;
+ const go=async()=>{const j=await api('/api/login',{password:$('#pw').value});if(j.ok)refresh();else $('#le').textContent=j.error||'Login failed'};$('#lg').onclick=go;$('#pw').onkeydown=e=>{if(e.key==='Enter')go()}}
+
+const CONV_LBL={ok:['Fits','ok'],near:['Near limit','warn'],over:['Over — replies fail','bad'],unknown:['No turns yet','']};
+function convFor(aid){return (S.d.sessions||[]).find(x=>x.agent===aid)}
+function convRow(aid,compact){const c=convFor(aid);if(!c)return `<div class="row"><div class="rl"><b>Conversation</b><div class="sub">Loading…</div></div></div>`;
+ const [lbl,cls]=CONV_LBL[c.state]||CONV_LBL.unknown;const pct=Math.min(100,c.pct||0);
+ return `<div class="row"><div class="rl"><b>Conversation</b><div class="sub">${c.error?esc(c.error):`${fmt(c.used)} of ${fmt(c.budget)} tokens · on <span class="mono">${esc(c.model||'?')}</span>${c.messages!=null?' · '+c.messages+' messages':''}`}</div></div>
+ <div class="rc"><div class="pb"><i style="width:${pct}%;background:${cls==='bad'?'var(--bad)':cls==='warn'?'var(--warn)':'var(--accent)'}"></i></div><span class="tag ${cls}">${lbl}</span><button class="btn" data-compact="${esc(aid)}">Compact</button><button class="btn ${c.state==='over'?'primary':''}" data-reset="${esc(aid)}">Reset</button></div></div>`}
+function wireConv(){qa('[data-reset]').forEach(b=>b.onclick=async()=>{const a=b.dataset.reset;if(!confirm(`Start a fresh conversation for ${a}?\n\nIts chat history is cleared; its memory files (USER.md, notes) are kept.`))return;b.disabled=true;const j=await api('/api/session/reset',{agent:a});b.disabled=false;toast(j.ok?'Conversation reset':'Failed: '+(j.msg||j.error));await loadSessions(true);render()});
+ qa('[data-compact]').forEach(b=>b.onclick=async()=>{const a=b.dataset.compact;if(!confirm(`Compact ${a}'s conversation?\n\nThe model summarises the history. Can take a minute on the desktop; fails if the history already exceeds the context — use Reset then.`))return;b.disabled=true;b.textContent='Compacting…';const j=await api('/api/session/compact',{agent:a});toast(j.ok?'Compacted':'Compact failed: '+(j.msg||j.error));await loadSessions(true);render()})}
+async function loadSessions(fresh){try{const j=await api('/api/sessions'+(fresh?'?fresh=1':''));S.d.sessions=j.sessions}catch(e){}}
+function dot(ok,warn){return `<span class="dot ${ok?'ok':(warn?'warn':'bad')}"></span>`}
+function modelLabel(ref){const m=S.d.models.find(x=>x.ref===ref);return m?`${m.ref}${m.contextWindow?' · '+Math.round(m.contextWindow/1000)+'k':''}`:ref}
+function allModelOptions(sel,inherit){const cat=S.d.models;const known=new Set(cat.map(m=>m.ref));
+ let h=inherit?`<option value="" ${!sel?'selected':''}>Use default (${esc(S.d.agents.default.model)})</option>`:'';
+ const grp=(label,items)=>items.length?`<optgroup label="${esc(label)}">${items.map(m=>`<option value="${esc(m.ref)}" ${m.ref===sel?'selected':''}>${esc(m.label)}</option>`).join('')}</optgroup>`:'';
+ const by=p=>cat.filter(m=>m.provider===p).map(m=>({ref:m.ref,label:`${m.id} · ${Math.round((m.contextWindow||0)/1000)}k ctx`}));
+ const L=S.d.localProvider;if(L)h+=grp(L+' — configured',by(L));
+ const extra=L?(S.d.desktopModels||[]).filter(m=>!known.has(L+'/'+m.id)).map(m=>({ref:L+'/'+m.id,label:`${m.id}${m.quant?' · '+m.quant:''} (downloaded, not yet configured)`})):[];
+ if(L)h+=grp(L+' — downloaded',extra);
+ for(const p of [...new Set(cat.map(m=>m.provider))].filter(p=>p!==L))h+=grp(p,by(p));
+ return h}
+
+function render(){if(!S.d)return;const h=S.d.health||{};const tab=TABS.find(t=>t[0]===S.tab)||TABS[0];
+ $('#app').innerHTML=`<div class="app"><aside><div class="brand"><div class="logo">♜</div><div><b>Model Control</b><small>OpenClaw · ${esc(location.hostname)}</small></div></div>
+ <div class="nav">${TABS.map(([k,v,ic,c])=>`<button data-t="${k}" class="${S.tab===k?'on':''}"><span class="ic" style="background:${c}">${ic}</span>${v}</button>`).join('')}</div>
+ <div class="status"><div class="st">${dot(h.gateway)}OpenClaw gateway</div>${h.unsloth?.provider?`<div class="st">${dot(h.unsloth?.ok)}${esc(h.unsloth.provider)}${h.unsloth?.ok&&h.unsloth.active?' · '+esc(String(h.unsloth.active).split('/').pop()):''}</div>`:''}${(h.others||[]).map(o=>`<div class="st">${dot(o.ok)}${esc(o.id)}</div>`).join('')}</div></aside>
+ <main><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><h1 style="margin:0;flex:1">${tab[1]}</h1><button class="btn" id="rf">Refresh</button><button class="btn" id="lo">Sign Out</button></div><div id="page"></div></main></div>`;
+ qa('.nav button').forEach(b=>b.onclick=()=>{S.tab=b.dataset.t;try{localStorage.setItem('mc_tab',S.tab)}catch(e){};render()});
+ $('#rf').onclick=async()=>{toast('Refreshing…');await api('/api/health?fresh=1');await refresh()};$('#lo').onclick=async()=>{await api('/api/logout',{});renderLogin()};
+ ({overview:rOverview,agents:rAgents,models:rModels,gpu:rGpu,sched:rSched,health:rHealth,log:rLog})[S.tab]()}
+
+/* ---------------- Overview */
+const KIND={unsloth:'Unsloth Studio',lmstudio:'LM Studio',ollama:'Ollama',generic:'OpenAI-compatible'};
+function rOverview(){const d=S.d,h=d.health||{},u=h.unsloth||{};
+ const desk=u.ok?`<b class="ok-t">Online</b>${u.active?' — '+esc(u.active)+' loaded':''}`:`<b class="bad-t">Offline</b> — ${u.hostUp===false?'the machine isn\'t reachable':u.portOpen===false?'machine is up, but the server isn\'t running':esc(u.error||'not reachable')}`;
+ $('#page').innerHTML=`<p class="lead">What your agents are using right now, and whether the machines behind them are up. Change things in the other sections.</p>
+ <div class="gh">Status</div><div class="group">
+  <div class="row"><div class="rl"><b>OpenClaw gateway</b><div class="sub">The service that runs every agent</div></div><div class="rc">${dot(h.gateway)}${h.gateway?'Running':'<span class="bad-t">Down</span>'}</div></div>
+  ${u.provider?`<div class="row"><div class="rl"><b>${esc(u.provider)} <span class="tag">${esc(KIND[u.kind]||u.kind||'')}</span></b><div class="sub mono">${esc((u.url||'').replace(/^https?:\/\//,''))}</div></div><div class="rc">${dot(u.ok)}${desk}${u.ok&&u.context?' <button class="btn" data-sync>Sync context</button>':''}</div></div>`:''}
+  ${(h.others||[]).map(o=>`<div class="row"><div class="rl"><b>${esc(o.id)} <span class="tag">${esc(KIND[o.kind]||o.kind)}</span></b><div class="sub mono">${esc((o.url||'').replace(/^https?:\/\//,''))}</div></div><div class="rc">${dot(o.ok)}${o.ok?'Reachable':'<span class="bad-t">Unreachable</span>'}</div></div>`).join('')}
+ </div><div class="foot">${u.provider&&!u.ok?`While <b>${esc(u.provider)}</b> is offline, every agent that uses one of its models can\'t answer. Start the server and load a model, then Refresh.`:'The first row is the local server the panel can inspect (loaded model, context). The others are checked for reachability only.'}</div>
+ <div class="gh">Who uses what <span class="sp"></span><span class="muted" style="font-weight:400">swipe a tile left for Manage / Delete</span></div><div class="tiles">
+  ${d.agents.agents.map(a=>{const m=d.models.find(x=>x.ref===a.effective);const onDesk=(a.effective||'').startsWith('unsloth/');const c=convFor(a.id);const [cl,cc]=c?(CONV_LBL[c.state]||CONV_LBL.unknown):['',''];
+   return `<div class="tile" data-tile="${esc(a.id)}"><div class="acts"><button class="m" data-tm="${esc(a.id)}" title="Manage">⚙<small>Manage</small></button>${a.id==='main'?'':`<button class="x" data-tx="${esc(a.id)}" title="Delete">🗑<small>Delete</small></button>`}</div>
+   <div class="fg"><div class="av">${esc(a.emoji||'🤖')}</div><div class="tx"><b>${esc(a.name)}</b><div class="sub">${esc(a.note||roleHint(a.id))}</div><div class="sub mono">${esc(a.effective)}</div></div>
+   <div class="tg">${a.inherits?'<span class="tag">default</span>':''}${m?`<span class="tag">${Math.round(m.contextWindow/1000)}k ctx</span>`:''}${c&&c.pct!=null?`<span class="tag ${cc}">${c.pct}% · ${cl}</span>`:''}${onDesk&&!u.ok?'<span class="tag bad">offline</span>':''}</div><span class="hint">‹</span></div></div>`}).join('')}
+ </div><div class="foot">"default" means the agent follows the <b>Default model</b> (${esc(d.agents.default.model)}). Swipe (or drag) a tile to the left for quick actions; the Agents page has the full settings.</div>
+ <div class="gh">Conversations <span class="sp"></span><button class="btn" id="cvr" style="font-weight:400">Re-check</button></div><div class="group">${d.agents.agents.map(a=>convRow(a.id).replace('<b>Conversation</b>',`<b>${esc(a.emoji)} ${esc(a.name)}</b>`)).join('')}</div>
+ <div class="foot">How full each agent's running conversation is against its model's context. <b>Over</b> means replies are failing silently — Reset it. Switching an agent to a model with a smaller context than its conversation causes the same thing; the Agents page now warns before it lets you.</div>
+ <div class="gh">Recent changes</div><div class="group">${(d.log.slice(0,5).map(l=>`<div class="row"><div class="rl"><div class="sub mono">${esc(l.t)}</div>${esc(l.msg)}</div></div>`).join(''))||'<div class="row muted">Nothing yet.</div>'}</div>
+ ${helpGroup(['conv','current','context','fallback'])}`;
+ wireConv();wireTiles();const cv=$('#cvr');if(cv)cv.onclick=async()=>{cv.disabled=true;await loadSessions(true);render()}}
+function wireTiles(){const W=144;let open=null;
+ qa('.tile').forEach(t=>{const fg=t.querySelector('.fg');const hasX=!!t.querySelector('.x');const w=hasX?W:72;let x0=null,dx=0,cur=0,moved=false;
+  const setX=v=>{cur=v;fg.style.transform=`translateX(${v}px)`};
+  const close=()=>{fg.classList.remove('drag');setX(0);if(open===t)open=null};
+  fg.addEventListener('pointerdown',e=>{if(e.button&&e.button!==0)return;x0=e.clientX;dx=0;moved=false;fg.classList.add('drag');fg.setPointerCapture(e.pointerId)});
+  fg.addEventListener('pointermove',e=>{if(x0==null)return;dx=e.clientX-x0;if(Math.abs(dx)>4)moved=true;const base=open===t?-w:0;setX(Math.max(-w,Math.min(0,base+dx)))});
+  const end=e=>{if(x0==null)return;x0=null;fg.classList.remove('drag');const shouldOpen=cur<-w/2;if(shouldOpen){if(open&&open!==t)open.querySelector('.fg').style.transform='translateX(0)';open=t;setX(-w)}else close();
+   if(!moved&&open!==t&&cur===0){/* plain tap on desktop: nudge to show actions */ open=t;setX(-w)}};
+  fg.addEventListener('pointerup',end);fg.addEventListener('pointercancel',end);
+  t.querySelector('[data-tm]').onclick=()=>{close();openManage(t.dataset.tile)};const xb=t.querySelector('[data-tx]');if(xb)xb.onclick=()=>{close();openDelete(t.dataset.tile)}})}
+function modal(title,body,footer){const ov=document.createElement('div');ov.className='ov';ov.innerHTML=`<div class="sheet" role="dialog"><div class="hd"><b>${title}</b><button class="btn" data-close>Close</button></div><div class="bd">${body}</div><div class="ft">${footer||''}</div></div>`;
+ document.body.appendChild(ov);const closeM=()=>ov.remove();ov.querySelector('[data-close]').onclick=closeM;ov.addEventListener('click',e=>{if(e.target===ov)closeM()});document.addEventListener('keydown',function k(e){if(e.key==='Escape'){closeM();document.removeEventListener('keydown',k)}});return {ov,close:closeM}}
+function openManage(aid){const a=S.d.agents.agents.find(x=>x.id===aid);if(!a)return;const c=convFor(aid);
+ const {ov,close}=modal(`${esc(a.emoji)} ${esc(a.name)} <span class="tag mono">${esc(aid)}</span>`,`
+  <div class="gh" style="margin-top:0">Quick changes</div><div class="group">
+   <div class="row"><div class="rl"><b>Model</b></div><div class="rc"><select id="qm">${allModelOptions(a.model,true)}</select></div></div>
+   <div class="row"><div class="rl"><b>Thinking level</b></div><div class="rc"><select id="qt"><option value="">Default (medium)</option>${['off','minimal','low','medium','high','xhigh','adaptive','max'].map(t=>`<option ${a.thinking===t?'selected':''}>${t}</option>`).join('')}</select></div></div>
+   <div class="row"><div class="rl"><b>Tool access</b></div><div class="rc"><select id="qp"><option value="">Inherit (full)</option>${['minimal','messaging','coding','full'].map(t=>`<option ${a.toolProfile===t?'selected':''}>${t}</option>`).join('')}</select></div></div>
+   <div class="row"><div class="rl"><b>Name</b></div><div class="rc"><input type="text" id="qn" value="${esc(a.name)}"></div></div>
+   <div class="row"><div class="rl"><b>Emoji</b></div><div class="rc"><input type="text" id="qe" value="${esc(a.emoji)}" style="min-width:60px;width:70px"></div></div>
+   <div class="row"><div class="rl"><b>Note</b><div class="sub">What this agent is for</div></div><div class="rc full"><textarea id="qd">${esc(a.note||'')}</textarea></div></div>
+  </div>
+  <div class="gh">Conversation</div><div class="group"><div class="row"><div class="rl"><b>${c&&c.pct!=null?`${fmt(c.used)} of ${fmt(c.budget)} tokens`:'No turns yet'}</b><div class="sub">${c?esc((CONV_LBL[c.state]||CONV_LBL.unknown)[0]):''}</div></div><div class="rc"><button class="btn" id="qr">Reset conversation</button></div></div></div>
+  <div class="foot">Full settings — fallbacks, context copies, prompt budget — are on the Agents page.</div>`,
+  `<button class="btn" data-close2>Cancel</button><button class="btn primary" id="qs">Save</button>`);
+ ov.querySelector('[data-close2]').onclick=close;
+ ov.querySelector('#qr').onclick=async e=>{if(!confirm(`Start a fresh conversation for ${aid}? Memory files are kept.`))return;e.target.disabled=true;const j=await api('/api/session/reset',{agent:aid});toast(j.ok?'Conversation reset':'Failed: '+(j.msg||j.error));await loadSessions(true);render();close()};
+ ov.querySelector('#qs').onclick=async e=>{e.target.disabled=true;const model=ov.querySelector('#qm').value;const chosen=model||S.d.agents.default.model;const cm=S.d.models.find(m=>m.ref===chosen);
+  if(c&&cm&&c.used&&cm.contextWindow&&cm.contextWindow<c.used*1.1&&!confirm(`${chosen} has a ${fmt(cm.contextWindow)}-token context but this conversation is ${fmt(c.used)} tokens. Save and reset the conversation?`)){e.target.disabled=false;return}
+  const r1=await api('/api/agent',{agent:aid,model,fallbacks:a.fallbacks||[],note:ov.querySelector('#qd').value,thinking:ov.querySelector('#qt').value,promptBudget:a.promptBudget||''});
+  const r2=await api('/api/agent/tools',{agent:aid,profile:ov.querySelector('#qp').value});
+  const n=ov.querySelector('#qn').value.trim(),em=ov.querySelector('#qe').value.trim();let r3={ok:true};if(n!==a.name||em!==a.emoji)r3=await api('/api/agent/identity',{agent:aid,name:n,emoji:em,theme:a.theme||''});
+  if(r1.ok&&c&&cm&&c.used&&cm.contextWindow&&cm.contextWindow<c.used*1.1)await api('/api/session/reset',{agent:aid});
+  const bad=[r1,r2,r3].filter(r=>!r.ok);toast(bad.length?'Some changes failed: '+bad.map(r=>r.msg||r.error).join('; '):'Saved');close();await refresh();await loadSessions(true);render()}}
+function openDelete(aid){const a=S.d.agents.agents.find(x=>x.id===aid);if(!a)return;
+ const {ov,close}=modal(`Delete ${esc(a.name)}?`,`<div class="group"><div class="row"><div class="rl"><b>This removes the agent, its conversations, and any routing rules pointing at it.</b><div class="sub">Its workspace and state are zipped to ~/.openclaw/backups first, so it can be restored by hand.</div></div></div>
+  <div class="row"><div class="rl"><b>Type <span class="mono">${esc(aid)}</span> to confirm</b></div><div class="rc"><input type="text" id="dc" placeholder="${esc(aid)}" autocomplete="off" autocapitalize="off"></div></div></div>`,
+  `<button class="btn" data-close2>Cancel</button><button class="btn danger" id="dgo" disabled>Delete</button>`);
+ const inp=ov.querySelector('#dc'),go=ov.querySelector('#dgo');ov.querySelector('[data-close2]').onclick=close;inp.focus();inp.oninput=()=>{go.disabled=inp.value.trim()!==aid};
+ go.onclick=async()=>{if(inp.value.trim()!==aid)return;go.disabled=true;go.textContent='Deleting…';const j=await api('/api/agent/delete',{agent:aid,confirm:inp.value.trim()});toast(j.ok?`Deleted ${aid} — backup saved`:'Not deleted: '+(j.msg||j.error));close();await refresh();await loadSessions(true);render()}}
+function roleHint(id){return id==='main'?'Default agent (dashboard / CLI)':''}
+
+/* ---------------- Agents */
+function agentGroup(a,isDefault){const id=isDefault?'__default__':a.id;const k=kid(id);const eff=isDefault?a.model:(a.model||S.d.agents.default.model);
+ const effM=S.d.models.find(m=>m.ref===eff);const others=S.d.models.filter(m=>m.ref!==eff);
+ return `<div class="gh">${isDefault?'Default model':`${esc(a.emoji)} ${esc(a.name)} <span class="tag mono">${esc(a.id)}</span><span class="sp"></span><button class="btn" data-manage="${esc(a.id)}" style="font-weight:400">Manage…</button>`}</div><div class="group" data-agent="${esc(id)}">${isDefault?'':managePanel(a)}
+  <div class="row"><div class="rl"><b>Model</b><div class="sub">${isDefault?'Used by every agent set to "Use default"':'Which model answers for this agent'}</div></div>
+   <div class="rc"><select id="am_${k}">${allModelOptions(a.model,!isDefault)}</select></div></div>
+  <div class="row"><div class="rl"><b>Context</b><div class="sub">Comes from the model entry — ${effM?fmt(effM.contextWindow)+' tokens':'unknown'}</div></div>
+   <div class="rc">${eff&&S.d.localProvider&&S.d.unsloth?.kind==='unsloth'&&eff.startsWith(S.d.localProvider+'/')?`<button class="btn" data-copy="${esc(eff)}" data-agent="${esc(id)}">Different context for this ${isDefault?'default':'agent'}…</button>`:`<span class="muted">Set on the model entry (Models &amp; Context)</span>`}</div></div>
+  <div class="inline" id="cp_${k}"><div class="f"><span>Make a copy of <span class="mono">${esc(eff)}</span> with context</span><input type="number" id="cpv_${k}" value="32768" step="4096" min="4096"><span>tokens</span><button class="btn primary" data-mkcopy="${esc(id)}">Create and assign</button></div><div class="foot" style="margin:6px 0 0">Creates a second entry (e.g. <span class="mono">…-32k</span>) that Unsloth serves with the same loaded model. Only works for Unsloth Studio.</div></div>
+  <div class="row"><div class="rl"><b>Fallbacks</b><div class="sub">Tried in order if the model above errors</div></div>
+   <div class="rc"><div class="chips">${others.map(m=>`<label class="chip ${(a.fallbacks||[]).includes(m.ref)?'on':''}"><input type="checkbox" class="fb" value="${esc(m.ref)}" ${(a.fallbacks||[]).includes(m.ref)?'checked':''} hidden>${esc(shortName(m.ref))}</label>`).join('')||'<span class="muted">No other models configured</span>'}</div></div></div>
+  <div class="row"><div class="rl"><b>Thinking level</b><div class="sub">Reasoning effort before each answer</div></div>
+   <div class="rc"><select id="at_${k}"><option value="">Default (medium)</option>${['off','minimal','low','medium','high','xhigh','adaptive','max'].map(t=>`<option ${a.thinking===t?'selected':''}>${t}</option>`).join('')}</select></div></div>
+  <div class="row"><div class="rl"><b>Prompt budget</b><div class="sub">Max characters of instruction files per turn</div></div>
+   <div class="rc"><input type="number" id="ab_${k}" value="${a.promptBudget??''}" placeholder="default" step="1000" min="1000"><span class="muted">chars</span></div></div>
+  ${isDefault?'':convRow(a.id)}
+  ${isDefault?'':`<div class="row"><div class="rl"><b>Why this model?</b><div class="sub">A note for future you (saved as the agent's description)</div></div><div class="rc full"><textarea id="an_${k}" placeholder="e.g. needs the smartest model; speed matters less than judgment.">${esc(a.note)}</textarea></div></div>`}
+  <div class="row"><div class="rl"><span class="muted" id="as_${k}"></span></div><div class="rc"><button class="btn primary" data-save="${esc(id)}">Save</button></div></div>
+ </div>`}
+function managePanel(a){const k=kid(a.id);const isMain=a.id==='main';
+ return `<div class="inline" id="mg_${k}"><div class="f" style="margin-bottom:8px"><b>Identity</b></div>
+  <div class="f"><label class="muted">Name <input type="text" id="mn_${k}" value="${esc(a.name)}" style="min-width:140px"></label><label class="muted">Emoji <input type="text" id="me_${k}" value="${esc(a.emoji)}" style="min-width:60px;width:70px"></label><label class="muted">Vibe <input type="text" id="mt_${k}" value="${esc(a.theme||'')}" placeholder="e.g. warm, blunt, curious" style="min-width:220px"></label><button class="btn" data-ident="${esc(a.id)}">Save identity</button></div>
+  <div class="foot" style="margin:6px 0 10px">The name and emoji show in chats. The vibe is a one-line personality hint; the real personality lives in <span class="mono">${esc(a.workspace||'')}/SOUL.md</span>, which you can edit directly.</div>
+  <div class="f"><b style="margin-right:6px">Tool access</b><select id="mp_${k}"><option value="">Inherit (full)</option>${['minimal','messaging','coding','full'].map(t=>`<option ${a.toolProfile===t?'selected':''}>${t}</option>`).join('')}</select><button class="btn" data-tools="${esc(a.id)}">Save</button><span class="muted">Explicit allow/deny lists set earlier still apply on top.</span></div>
+  <div class="f" style="margin-top:10px"><b style="margin-right:6px">Workspace</b><span class="mono muted">${esc(a.workspace||'')}</span></div>
+  ${isMain?'<div class="foot" style="margin-top:10px">The main agent can\'t be deleted.</div>':`<div class="f" style="margin-top:14px;padding-top:10px;border-top:1px solid var(--sep)"><b class="bad-t" style="margin-right:6px">Delete agent</b><span class="muted">Backs up its workspace and state to ~/.openclaw/backups first, then removes it, its conversations, and any routing rules pointing at it.</span></div>
+  <div class="f" style="margin-top:6px"><span class="muted">Type <span class="mono">${esc(a.id)}</span> to confirm:</span><input type="text" id="mdc_${k}" placeholder="${esc(a.id)}" autocomplete="off" style="min-width:140px"><button class="btn danger" id="mdb_${k}" data-del="${esc(a.id)}" disabled>Delete ${esc(a.name)}</button></div>`}
+ </div>`}
+function newAgentForm(){const d=S.d;
+ return `<div class="gh">New agent</div><div class="group" id="newagent">
+  <div class="row"><div class="rl"><b>Agent id</b><div class="sub">Short, lowercase, no spaces — used in commands and file paths; can't be changed later</div></div><div class="rc"><input type="text" id="na_id" placeholder="e.g. knight" class="mono"></div></div>
+  <div class="row"><div class="rl"><b>Display name</b><div class="sub">What it calls itself</div></div><div class="rc"><input type="text" id="na_name" placeholder="Knight"></div></div>
+  <div class="row"><div class="rl"><b>Emoji</b></div><div class="rc"><input type="text" id="na_emoji" placeholder="♞" style="min-width:60px;width:70px"></div></div>
+  <div class="row"><div class="rl"><b>Vibe</b><div class="sub">One line of personality; edit SOUL.md later for more</div></div><div class="rc"><input type="text" id="na_theme" placeholder="e.g. patient, precise, a little dry" style="min-width:260px"></div></div>
+  <div class="row"><div class="rl"><b>Model</b></div><div class="rc"><select id="na_model">${allModelOptions('',true)}</select></div></div>
+  <div class="row"><div class="rl"><b>Tool access</b><div class="sub">Start narrow; widen later from Manage</div></div><div class="rc"><select id="na_tools"><option value="minimal">minimal — chat only</option><option value="messaging">messaging — chat + send messages</option><option value="coding">coding — files, shell, web</option><option value="full">full — everything</option></select></div></div>
+  <div class="row"><div class="rl"><b>Thinking level</b></div><div class="rc"><select id="na_think"><option value="">Default (medium)</option>${['off','minimal','low','medium','high'].map(t=>`<option>${t}</option>`).join('')}</select></div></div>
+  <div class="row"><div class="rl"><b>Prompt budget</b><div class="sub">Max characters of instruction files per turn</div></div><div class="rc"><input type="number" id="na_budget" placeholder="default" step="1000" min="1000"><span class="muted">chars</span></div></div>
+  <div class="row"><div class="rl"><b>Skip first-run introduction</b><div class="sub">Off = the agent asks what to call it on first chat (OpenClaw's "birth" ritual)</div></div><div class="rc"><label class="sw"><input type="checkbox" id="na_skip" checked><i></i></label></div></div>
+  <div class="row"><div class="rl"><b>What is it for?</b><div class="sub">Saved as the agent's description</div></div><div class="rc full"><textarea id="na_note" placeholder="e.g. Research helper for the garage project"></textarea></div></div>
+  <div class="row"><div class="rl"><span class="muted" id="na_status"></span></div><div class="rc"><button class="btn" id="na_cancel">Cancel</button><button class="btn primary" id="na_go">Create agent</button></div></div>
+ </div><div class="foot">Creates <span class="mono">~/.openclaw/workspace-&lt;id&gt;/</span> with starter SOUL.md, AGENTS.md and USER.md you can edit. Nothing routes to a new agent until you bind a channel (e.g. <span class="mono">openclaw agents bind --agent &lt;id&gt; --bind telegram</span>) or talk to it from the OpenClaw dashboard.</div>`}
+function rAgents(){const d=S.d;
+ $('#page').innerHTML=`<div class="row" style="padding:0 0 10px"><div class="rl"></div><div class="rc"><button class="btn" id="addagent">Add Agent…</button></div></div><div id="naslot">${S.showNew?newAgentForm():''}</div><p class="lead">Each agent can use its own model, fallbacks, and reasoning level.${d.desktopDown&&d.localProvider?` <b>${esc(d.localProvider)} is offline right now</b>, so only already-configured models are listed; downloaded-but-unconfigured ones appear when it\'s back.`:''}</p>
+ ${agentGroup(d.agents.default,true)}${d.agents.agents.map(a=>agentGroup(a,false)).join('')}
+ <div class="foot" style="margin-top:14px">Picking a model from the "downloaded" list adds it to OpenClaw automatically with a sensible context. Use <b>Health &amp; Speed</b> to measure what each one actually does on your hardware.</div>
+ ${helpGroup(['tools','conv','context','fallback','thinking','budget','copy','current'])}`;
+ wireAgentMgmt();
+ qa('.chip').forEach(c=>c.onclick=e=>{e.preventDefault();const i=c.querySelector('input');i.checked=!i.checked;c.classList.toggle('on',i.checked)});
+ qa('[data-copy]').forEach(b=>b.onclick=()=>{$('#cp_'+kid(b.dataset.agent)).classList.toggle('show')});
+ qa('[data-mkcopy]').forEach(b=>b.onclick=async()=>{const id=b.dataset.mkcopy,k=kid(id);const g=document.querySelector(`[data-agent="${CSS.escape(id)}"]`);const src=g.querySelector('[data-copy]').dataset.copy;
+  b.disabled=true;const j=await api('/api/alias',{ref:src,contextWindow:+$('#cpv_'+k).value});
+  if(!j.ok){b.disabled=false;return toast('Could not create copy: '+(j.msg||j.error))}
+  const j2=await api('/api/agent',{agent:id,model:j.msg,fallbacks:[],note:null});b.disabled=false;toast(j2.ok?'Created '+j.msg+' and assigned':'Created copy, but assigning failed: '+(j2.msg||j2.error));refresh()});
+ qa('[data-save]').forEach(b=>b.onclick=async()=>{const id=b.dataset.save,k=kid(id);const g=document.querySelector(`[data-agent="${CSS.escape(id)}"]`);b.disabled=true;$('#as_'+k).textContent='Saving…';
+  const fb=qa(`[data-agent="${CSS.escape(id)}"] .fb:checked`).map(i=>i.value);const note=$('#an_'+k)?$('#an_'+k).value:null;
+  const chosen=$('#am_'+k).value||S.d.agents.default.model;const cm=S.d.models.find(m=>m.ref===chosen);const c=id==='__default__'?null:convFor(id);let resetAfter=false;
+  if(c&&cm&&c.used&&cm.contextWindow&&cm.contextWindow<c.used*1.1){b.disabled=false;$('#as_'+k).textContent='';
+   if(!confirm(`${chosen} has a ${fmt(cm.contextWindow)}-token context, but ${id}'s conversation is already ${fmt(c.used)} tokens. Saving as-is would make every reply fail.\n\nOK = save AND reset the conversation (memory files are kept).\nCancel = don't save.`))return;resetAfter=true;b.disabled=true}
+  const j=await api('/api/agent',{agent:id,model:$('#am_'+k).value,fallbacks:fb,note,thinking:$('#at_'+k).value,promptBudget:$('#ab_'+k).value?+$('#ab_'+k).value:''});
+  if(j.ok&&resetAfter){const r=await api('/api/session/reset',{agent:id});toast(r.ok?'Saved and conversation reset':'Saved, but reset failed: '+(r.msg||r.error))}
+  b.disabled=false;$('#as_'+k).textContent='';if(!resetAfter)toast(j.ok?'Saved — takes effect on the next turn':'Not saved: '+(j.msg||j.error));if(j.ok){await loadSessions(true);refresh()}})
+ wireConv()}
+
+function wireAgentMgmt(){
+ $('#addagent').onclick=()=>{S.showNew=!S.showNew;rAgents();if(S.showNew)$('#na_id').focus()};
+ const nc=$('#na_cancel');if(nc){nc.onclick=()=>{S.showNew=false;rAgents()};
+  $('#na_go').onclick=async()=>{const b={id:$('#na_id').value.trim(),name:$('#na_name').value.trim(),emoji:$('#na_emoji').value.trim(),theme:$('#na_theme').value.trim(),model:$('#na_model').value,toolProfile:$('#na_tools').value,thinking:$('#na_think').value,promptBudget:$('#na_budget').value?+$('#na_budget').value:null,skipRitual:$('#na_skip').checked,note:$('#na_note').value.trim()};
+   if(!/^[a-z][a-z0-9-]{1,30}$/.test(b.id))return toast('Agent id: lowercase letters, digits and dashes, starting with a letter');
+   $('#na_go').disabled=true;$('#na_status').textContent='Creating… (10–20 s)';const j=await api('/api/agent/create',b);$('#na_go').disabled=false;$('#na_status').textContent='';
+   toast(j.ok?`Created ${b.id}`:'Not created: '+(j.msg||j.error));if(j.ok){S.showNew=false;await refresh();await loadSessions(true);render()}}}
+ qa('[data-manage]').forEach(b=>b.onclick=()=>{const p=$('#mg_'+kid(b.dataset.manage));p.classList.toggle('show');b.textContent=p.classList.contains('show')?'Close':'Manage…'});
+ qa('[data-ident]').forEach(b=>b.onclick=async()=>{const id=b.dataset.ident,k=kid(id);b.disabled=true;const j=await api('/api/agent/identity',{agent:id,name:$('#mn_'+k).value.trim(),emoji:$('#me_'+k).value.trim(),theme:$('#mt_'+k).value.trim()});b.disabled=false;toast(j.ok?'Identity saved':'Failed: '+(j.msg||j.error));if(j.ok)refresh()});
+ qa('[data-tools]').forEach(b=>b.onclick=async()=>{const id=b.dataset.tools,k=kid(id);b.disabled=true;const j=await api('/api/agent/tools',{agent:id,profile:$('#mp_'+k).value});b.disabled=false;toast(j.ok?'Tool access saved':'Failed: '+(j.msg||j.error));if(j.ok)refresh()});
+ qa('[data-del]').forEach(b=>{const id=b.dataset.del,k=kid(id);const inp=$('#mdc_'+k);inp.oninput=()=>{b.disabled=inp.value.trim()!==id};
+  b.onclick=async()=>{if(inp.value.trim()!==id)return;if(!confirm(`Delete agent "${id}"?\n\nIts workspace and state are zipped to ~/.openclaw/backups first. This removes the agent, its conversations and routing rules.`))return;
+   b.disabled=true;b.textContent='Deleting…';const j=await api('/api/agent/delete',{agent:id,confirm:inp.value.trim()});toast(j.ok?`Deleted ${id} — backup: ${j.msg}`:'Not deleted: '+(j.msg||j.error));if(j.ok){await refresh();await loadSessions(true);render()}else{b.disabled=false;b.textContent='Delete'}}})}
+
+/* ---------------- Models & context */
+const pLabel=p=>{const sv=(S.d.servers||[]).find(x=>x.provider===p);return sv?`${p} — ${KIND[sv.kind]||sv.kind}`:p};
+function rModels(){const d=S.d;const provs=Object.keys(d.providers||{});const u=d.unsloth||{};
+ const known=new Set(d.models.map(m=>m.ref));const extra=(d.desktopModels||[]).filter(m=>!known.has('unsloth/'+m.id));
+ $('#page').innerHTML=`<div class="row" style="padding:0 0 10px"><div class="rl"></div><div class="rc"><button class="btn" id="addprov">Add Provider…</button></div></div>
+ <p class="lead">Every model OpenClaw knows about, grouped by the server that runs it. Edit the two numbers that matter most — context and max output — or add, rename and remove entries.</p>
+ ${provs.map(p=>{const pv=d.providers[p];const list=d.models.filter(m=>m.provider===p);
+  return `<div class="gh">${esc(pLabel(p))} <span class="tag mono">${esc(pv.baseUrl)}</span><span class="tag">${esc(pv.api)}</span>${pv.hasKey?'<span class="tag ok">key set</span>':''}<span class="sp"></span>
+   ${p===d.localProvider&&u.ok&&u.context?`<button class="btn" data-sync style="font-weight:400">Sync context (${fmt(u.context)})</button>`:''}<button class="btn" data-ptest="${esc(p)}" style="font-weight:400">Test</button><button class="btn" data-madd="${esc(p)}" style="font-weight:400">Add model</button>${list.length?'':`<button class="btn danger" data-pdel="${esc(p)}" style="font-weight:400">Remove provider</button>`}</div>
+   <div class="group" id="pg_${kid(p)}">${list.map(m=>{const loadedCtx=p===d.localProvider&&u.ok?u.context:null;const over=loadedCtx&&m.contextWindow>loadedCtx;const users=(d.usage||{})[m.ref]||[];
+    return `<div class="row"><div class="rl"><b class="mono">${esc(m.id)}</b><div class="sub">${esc(m.name)} · ${fmt(m.contextWindow)} ctx · ${fmt(m.maxTokens)} max out${(m.input||[]).includes('image')?' · vision':''}${m.reasoning?' · reasoning':''}${over?` <span class="warn-t">· larger than the ${fmt(loadedCtx)} loaded on the desktop</span>`:''}</div><div class="sub">${users.length?'Used by: '+esc(users.join(', ')):'<span class="muted">Not used by any agent</span>'}</div></div>
+    <div class="rc"><button class="btn" data-test="${esc(m.ref)}">Test speed</button><span class="muted" id="tr_${kid(m.ref)}"></span><button class="btn" data-medit="${esc(m.ref)}">Edit</button><button class="btn danger" data-mdel="${esc(m.ref)}" ${users.length?'disabled title="Still used by '+esc(users.join(', '))+'"':''}>Delete</button></div></div>`}).join('')||'<div class="row muted">No models yet — click Add model.</div>'}</div>
+   <div class="foot">${p===d.localProvider?(u.ok?(u.context?`This server currently has <b>${esc(u.active)}</b> loaded with a <b>${fmt(u.context)}</b>-token context. Entries above that number fail on long conversations; Sync fixes them.`:`This server has <b>${esc(u.active||'nothing')}</b> loaded; it doesn\'t report the loaded context, so keep these numbers at or below what you loaded it with.`):'This server is offline, so the loaded context can\'t be checked right now.'):'Context here must match what this server was started with — the panel can\'t read it for this kind of server.'}</div>`}).join('')}
+ <div class="gh">Downloaded on ${esc(d.localProvider||'the local server')}, not yet in OpenClaw</div><div class="group">${extra.length?extra.map(m=>`<div class="row"><div class="rl"><b class="mono">${esc(m.id)}</b><div class="sub">${esc(m.quant||'')}${m.maxContext?' · up to '+fmt(m.maxContext)+' context':''}${m.loaded?' · <span class="ok-t">loaded now</span>':''}</div></div><div class="rc"><button class="btn" data-add="unsloth/${esc(m.id)}">Add to OpenClaw</button></div></div>`).join(''):`<div class="row muted">${!d.localProvider?'No local server (Unsloth Studio, LM Studio or Ollama) detected among your providers.':d.desktopDown?'Server offline — this list fills in when it\'s running.':'Everything downloaded is already configured.'}</div>`}</div>
+ <div class="foot">Adding a model here only tells OpenClaw it exists; the server still has to have it <b>loaded</b> (Servers) for it to answer. A model can't be deleted while an agent uses it — move the agent first.</div>
+ ${helpGroup(['context','maxout','current','copy','quant'])}`;
+ qa('[data-test]').forEach(b=>b.onclick=()=>speed(b.dataset.test,'tr_'+kid(b.dataset.test),b));
+ qa('[data-add]').forEach(b=>b.onclick=async()=>{b.disabled=true;const j=await api('/api/catalog/add',{id:b.dataset.add.replace(/^unsloth\//,'')});b.disabled=false;toast(j.ok?'Added to OpenClaw':'Failed: '+(j.msg||j.error));if(j.ok)refresh()});
+ qa('[data-medit]').forEach(b=>b.onclick=()=>openModelEdit(b.dataset.medit));
+ qa('[data-madd]').forEach(b=>b.onclick=()=>openModelEdit(null,b.dataset.madd));
+ qa('[data-mdel]').forEach(b=>b.onclick=async()=>{const ref=b.dataset.mdel;if(!confirm(`Remove ${ref} from OpenClaw?\n\nThis only forgets the entry; nothing is deleted on the server that runs it.`))return;b.disabled=true;const j=await api('/api/models/delete',{ref});toast(j.ok?'Removed':'Not removed: '+(j.msg||j.error));refresh()});
+ qa('[data-pdel]').forEach(b=>b.onclick=async()=>{const id=b.dataset.pdel;if(!confirm(`Remove provider "${id}"?`))return;const j=await api('/api/providers/delete',{id});toast(j.ok?'Provider removed':'Failed: '+(j.msg||j.error));refresh()});
+ qa('[data-ptest]').forEach(b=>b.onclick=async()=>{b.disabled=true;b.textContent='Testing…';const j=await api('/api/providers/test',{id:b.dataset.ptest});b.disabled=false;b.textContent='Test';
+  if(!j.ok)return toast('Not reachable: '+(j.msg||j.error));modal(`${esc(b.dataset.ptest)}: reachable in ${j.ms} ms`,`<div class="group">${(j.models||[]).map(id=>`<div class="row"><div class="rl mono">${esc(id)}</div></div>`).join('')||'<div class="row muted">The server answered but listed no models.</div>'}</div><div class="foot">Model ids the server reports. Use one of these as the id when adding a model.</div>`)});
+ $('#addprov').onclick=openProviderAdd}
+function openModelEdit(ref,prov){const m=ref?S.d.models.find(x=>x.ref===ref):null;const p=m?m.provider:prov;
+ const {ov,close}=modal(m?`Edit ${esc(m.ref)}`:`Add model to ${esc(pLabel(p))}`,`<div class="group">
+  <div class="row"><div class="rl"><b>Model id</b><div class="sub">${m?'Can\'t be changed — agents reference it':'Exactly what the server calls it (use Test to see the list). No @.'}</div></div><div class="rc">${m?`<span class="mono">${esc(m.id)}</span>`:`<input type="text" id="mi" class="mono" placeholder="e.g. qwen2.5-7b-instruct">`}</div></div>
+  <div class="row"><div class="rl"><b>Display name</b></div><div class="rc"><input type="text" id="mn" value="${esc(m?m.name:'')}" placeholder="Shown in menus"></div></div>
+  <div class="row"><div class="rl"><b>Context</b><div class="sub">Tokens of conversation sent per turn</div></div><div class="rc"><input type="number" id="mc" value="${m?m.contextWindow??'':''}" step="1024" min="1024"></div></div>
+  <div class="row"><div class="rl"><b>Max output</b><div class="sub">Longest reply allowed</div></div><div class="rc"><input type="number" id="mo" value="${m?m.maxTokens??4096:4096}" step="256" min="64"></div></div>
+  <div class="row"><div class="rl"><b>Accepts images</b></div><div class="rc"><label class="sw"><input type="checkbox" id="mv" ${m&&(m.input||[]).includes('image')?'checked':''}><i></i></label></div></div>
+  <div class="row"><div class="rl"><b>Reasoning model</b><div class="sub">Emits thinking before answering</div></div><div class="rc"><label class="sw"><input type="checkbox" id="mr" ${m&&m.reasoning?'checked':''}><i></i></label></div></div>
+ </div>`,`<button class="btn" data-close2>Cancel</button><button class="btn primary" id="ms">${m?'Save':'Add'}</button>`);
+ ov.querySelector('[data-close2]').onclick=close;
+ ov.querySelector('#ms').onclick=async e=>{e.target.disabled=true;const body={name:ov.querySelector('#mn').value,contextWindow:+ov.querySelector('#mc').value||null,maxTokens:+ov.querySelector('#mo').value||null,input:ov.querySelector('#mv').checked?['text','image']:['text'],reasoning:ov.querySelector('#mr').checked};
+  const j=m?await api('/api/models/update',{ref:m.ref,...body}):await api('/api/models/add',{provider:p,id:ov.querySelector('#mi').value.trim(),...body});
+  if(!j.ok){e.target.disabled=false;return toast('Not saved: '+(j.msg||j.error))}toast(m?'Saved':'Added');close();refresh()}}
+function openProviderAdd(){const {ov,close}=modal('Add provider',`<div class="group">
+  <div class="row"><div class="rl"><b>Provider id</b><div class="sub">Short name used in model refs, e.g. <span class="mono">lmstudio</span></div></div><div class="rc"><input type="text" id="pi" class="mono" placeholder="lmstudio"></div></div>
+  <div class="row"><div class="rl"><b>Base URL</b><div class="sub">Up to and including <span class="mono">/v1</span></div></div><div class="rc"><input type="text" id="pu" placeholder="http://192.168.0.50:1234/v1" style="min-width:260px"></div></div>
+  <div class="row"><div class="rl"><b>API style</b></div><div class="rc"><select id="pa"><option value="openai-completions">OpenAI chat completions (most local servers)</option><option value="openai-responses">OpenAI responses</option><option value="anthropic-messages">Anthropic messages</option><option value="ollama">Ollama</option></select></div></div>
+  <div class="row"><div class="rl"><b>API key</b><div class="sub">Optional. Stored in ~/.openclaw/.env, never shown again. The gateway restarts briefly to pick it up.</div></div><div class="rc"><input type="password" id="pk" placeholder="leave blank if none" autocomplete="new-password"></div></div>
+ </div><div class="foot">After adding, use <b>Test</b> on the provider to confirm it answers and to see the model ids it offers, then <b>Add model</b>.</div>`,`<button class="btn" data-close2>Cancel</button><button class="btn primary" id="ps">Add provider</button>`);
+ ov.querySelector('[data-close2]').onclick=close;
+ ov.querySelector('#ps').onclick=async e=>{e.target.disabled=true;const j=await api('/api/providers/add',{id:ov.querySelector('#pi').value.trim(),baseUrl:ov.querySelector('#pu').value.trim(),api:ov.querySelector('#pa').value,apiKey:ov.querySelector('#pk').value});
+  if(!j.ok){e.target.disabled=false;return toast('Not added: '+(j.msg||j.error))}toast('Provider added');close();refresh()}}
+async function speed(ref,outId,btn){if(btn)btn.disabled=true;$('#'+outId).textContent='testing…';const j=await api('/api/test',{ref});if(btn)btn.disabled=false;
+ $('#'+outId).innerHTML=j.ok?`<span class="ok-t">first word ${j.ttft}s · ${j.tps} tok/s</span>`:`<span class="bad-t">${esc(j.error)}</span>`}
+
+/* ---------------- Servers */
+function serverOffline(sv,h,isLocal){const seen=isLocal?h.lastSeen:null;
+ return `<div class="group">
+   ${isLocal?`<div class="row"><div class="rl"><b>Is the machine reachable?</b><div class="sub">Ping to ${esc((sv.baseUrl||'').replace(/^https?:\/\//,'').split('/')[0].split(':')[0])}</div></div><div class="rc">${h.hostUp==null?'<span class="muted">unknown</span>':h.hostUp?`${dot(true)}Reachable`:`${dot(false)}<span class="bad-t">No reply — off, asleep, or not on this network</span>`}</div></div>
+   <div class="row"><div class="rl"><b>Is the server running?</b><div class="sub">Port on ${esc((sv.baseUrl||'').replace(/^https?:\/\//,'').split('/')[0])}</div></div><div class="rc">${h.portOpen?`${dot(true)}Open, but not answering yet (still starting?)`:`${dot(false)}<span class="bad-t">Closed — start it</span>`}</div></div>
+   <div class="row"><div class="rl"><b>Last seen loaded</b><div class="sub">Remembered from the last time it answered</div></div><div class="rc">${seen?`<span class="mono">${esc(seen.active)}</span><span class="tag">${fmt(seen.context)} ctx</span><span class="muted">${esc(seen.seen)}</span>`:'<span class="muted">never (since this panel started)</span>'}</div></div>`:`<div class="row"><div class="rl"><b>Unreachable</b><div class="sub">${esc(sv.error||'')}</div></div></div>`}
+   <div class="row"><div class="rl"><b>Check again</b><div class="sub">The panel re-checks every 15 s on its own</div></div><div class="rc"><button class="btn primary" data-chk>Check now</button></div></div>
+  </div>`}
+function serverGroup(sv){const d=S.d,h=d.health?.unsloth||{};const isLocal=sv.provider===d.localProvider;const kind=KIND[sv.kind]||sv.kind;
+ let body='';
+ if(!sv.ok)body=serverOffline(sv,h,isLocal)+`<div class="foot">${isLocal?`To bring it back: start <b>${esc(kind)}</b> on that machine and load a model. Agents on <span class="mono">${esc(sv.provider)}/…</span> models resume automatically.`:'Agents using this provider can\'t answer until it\'s reachable.'}</div>`;
+ else if(sv.kind==='generic')body=`<div class="group"><div class="row"><div class="rl"><b>Reachable</b><div class="sub">${sv.models.length} model${sv.models.length===1?'':'s'} offered</div></div><div class="rc"><div class="chips">${sv.models.slice(0,12).map(m=>`<span class="chip">${esc(m.id)}</span>`).join('')}${sv.models.length>12?'<span class="muted">…</span>':''}</div></div></div></div>
+  <div class="foot">An OpenAI-compatible endpoint. It doesn't report what's loaded or with what context, so the numbers you set in <b>Models &amp; Context</b> are the truth. Use <b>Test speed</b> there to see how it performs.</div>`;
+ else{const chat=(sv.models||[]).filter(m=>!m.task);const canLoad=sv.caps?.load;
+  body=`<div class="group"><div class="kv"><div><div class="k">Loaded now</div><div class="v mono" style="font-size:14px">${esc(sv.active||'nothing')}</div></div><div><div class="k">Context loaded</div><div class="v">${sv.context?fmt(sv.context):'<span class="muted" style="font-size:13px">not reported</span>'}</div></div>${sv.gpuLayers?`<div><div class="k">Layers on GPU</div><div class="v">${esc(sv.gpuLayers)}</div></div>`:''}</div></div>
+  ${isLocal&&sv.context?`<div class="group" style="margin-top:8px"><div class="row"><div class="rl"><b>Keep OpenClaw's context in sync</b><div class="sub">When this server loads a model, set that model's OpenClaw entry to the same context automatically</div></div><div class="rc"><label class="sw"><input type="checkbox" id="syncsw" ${d.syncContext!==false?'checked':''}><i></i></label></div></div>
+   <div class="row"><div class="rl"><b>Sync context now</b><div class="sub">Set <span class="mono">current</span>, the loaded model, and every ${esc(sv.provider)} model an agent uses to ${fmt(sv.context)} tokens</div></div><div class="rc"><button class="btn primary" data-sync>Sync context</button></div></div></div>`:''}
+  <div class="foot">${sv.gpuLayers?'"Layers on GPU" should read all/all. If part of the model spills into system RAM it gets several times slower. ':''}${sv.context?`OpenClaw entries using this model should have a context ≤ ${fmt(sv.context)}.`:`${esc(kind)} didn't report the loaded context; set OpenClaw's entry to whatever you loaded it with.`}</div>
+  <div class="gh">Downloaded models</div><div class="group">${chat.map(m=>`<div class="row"><div class="rl"><b class="mono">${esc(m.id)}</b><div class="sub">${esc(m.quant||'')}${m.maxContext?' · up to '+fmt(m.maxContext)+' context':''}</div></div><div class="rc">${m.loaded?'<span class="tag ok">loaded</span>':canLoad?`<button class="btn" data-pick="${esc(m.id)}" data-q="${esc(m.quant||'')}">Choose…</button>`:''}</div></div>`).join('')||'<div class="row muted">Nothing downloaded.</div>'}</div>
+  ${canLoad?`<div class="gh">Load a model</div><div class="group">
+   <div class="row"><div class="rl"><b>Model</b></div><div class="rc"><select id="gm">${chat.map(m=>`<option value="${esc(m.id)}" data-q="${esc(m.quant||'')}">${esc(m.id)}</option>`).join('')}</select></div></div>
+   <div class="row"><div class="rl"><b>Quant</b><div class="sub">Compression level of the file</div></div><div class="rc"><input type="text" id="gv" placeholder="e.g. UD-Q4_K_XL"></div></div>
+   <div class="row"><div class="rl"><b>Context</b><div class="sub">0 = let the server pick the largest that fits</div></div><div class="rc"><input type="number" id="gc" value="0" step="4096" min="0"><span class="muted">tokens</span></div></div>
+   <div class="row"><div class="rl"><b>Why?</b><div class="sub">Goes in the change log</div></div><div class="rc full"><input type="text" id="gw" style="width:100%" placeholder="e.g. trying the bigger model overnight"></div></div>
+   <div class="row"><div class="rl"><span class="muted" id="gs"></span></div><div class="rc"><button class="btn" id="ge">Check memory first</button><button class="btn primary" id="gl">Load</button></div></div>
+   <div class="inline" id="go"></div></div>
+  <div class="foot">Loading replaces the current model; agents pause while it loads. <b>Always check memory first</b> — a model that doesn't fit in VRAM can crash the server, which then has to be restarted at the machine.</div>`:`<div class="foot">${esc(kind)} doesn't expose loading from this panel — switch models in ${esc(kind)} itself; the panel picks up the change within 15 s.</div>`}`}
+ return `<div class="gh">${esc(sv.provider)} <span class="tag">${esc(kind)}</span><span class="tag mono">${esc(sv.baseUrl)}</span>${isLocal?'<span class="tag ok">inspectable</span>':''}</div>${body}`}
+function rGpu(){const d=S.d;const servers=d.servers||[];
+ $('#page').innerHTML=`<p class="lead">Every server OpenClaw's providers point at. Local ones (Unsloth Studio, LM Studio, Ollama) can be inspected for what's loaded; plain OpenAI-compatible endpoints are checked for reachability.</p>
+  ${servers.map(serverGroup).join('')||'<div class="group"><div class="row muted">No providers configured in OpenClaw yet.</div></div>'}
+  ${helpGroup(['current','quant','context','ttft','tps'])}`;
+ qa('[data-chk]').forEach(b=>b.onclick=async()=>{toast('Checking…');await api('/api/health?fresh=1');await refresh()});
+ const sw=$('#syncsw');if(sw)sw.onchange=async e=>{const j=await api('/api/settings',{syncContext:e.target.checked});toast(j.ok?('Auto-sync '+(j.syncContext?'on':'off')):'Failed')};
+ const gm=$('#gm');if(gm){const syncQ=()=>{const o=gm.selectedOptions[0];$('#gv').value=o?.dataset.q||''};syncQ();gm.onchange=syncQ;
+  qa('[data-pick]').forEach(b=>b.onclick=()=>{gm.value=b.dataset.pick;$('#gv').value=b.dataset.q;gm.scrollIntoView({behavior:'smooth',block:'center'})});
+  const body=()=>({model_path:gm.value,gguf_variant:$('#gv').value,max_seq_length:+$('#gc').value||0,why:$('#gw').value});
+  $('#ge').onclick=async()=>{const o=$('#go');o.classList.add('show');o.textContent='Estimating…';const j=await api('/api/unsloth/estimate',body());o.innerHTML=j.ok?`<pre class="mono" style="white-space:pre-wrap;margin:0">${esc(JSON.stringify(j.estimate,null,2).slice(0,1500))}</pre>`:'<span class="bad-t">Estimate failed: '+esc(j.error)+'</span>'};
+  $('#gl').onclick=async()=>{const b=body();if(!confirm(`Load ${b.model_path} ${b.gguf_variant}?\n\nThe current model is unloaded first; agents pause until it finishes.`))return;
+   $('#gl').disabled=true;$('#gs').textContent='Requesting load…';const j=await api('/api/unsloth/load',{...b,confirmed:true});$('#gl').disabled=false;$('#gs').textContent='';toast(j.ok?'Load requested — this page updates when it finishes':'Failed: '+(j.msg||j.error));
+   setTimeout(async()=>{await api('/api/unsloth?fresh=1');await refresh()},10000)}}}
+
+/* ---------------- Schedules */
+const DAYS=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+function rSched(){const R=S.d.schedules;const agents=S.d.agents.agents;const chat=(S.d.desktopModels||[]);
+ const card=(r,i)=>`<div class="gh"><span>${esc(r.name||'New rule')}</span><span class="sp"></span><span class="muted">last ran ${esc(S.d.lastRun[r.id]||'never')}</span></div><div class="group" data-i="${i}">
+  <div class="row"><div class="rl"><b>Enabled</b></div><div class="rc"><label class="sw"><input type="checkbox" class="se" ${r.enabled?'checked':''}><i></i></label></div></div>
+  <div class="row"><div class="rl"><b>Name</b></div><div class="rc"><input type="text" class="sn" value="${esc(r.name||'')}" placeholder="e.g. Overnight 27B"></div></div>
+  <div class="row"><div class="rl"><b>When</b><div class="sub">This machine's clock; it must be awake</div></div><div class="rc"><input type="time" class="st" value="${esc(r.time||'08:00')}"><div class="chips">${DAYS.map((d,k)=>`<label class="chip ${(r.days||[0,1,2,3,4,5,6]).includes(k)?'on':''}"><input type="checkbox" class="sd" value="${k}" ${(r.days||[0,1,2,3,4,5,6]).includes(k)?'checked':''} hidden>${d}</label>`).join('')}</div></div></div>
+  <div class="row"><div class="rl"><b>Load on the local server</b><div class="sub">Optional (Unsloth Studio only) — leave blank to keep whatever is loaded</div></div><div class="rc"><input type="text" class="um" list="ulist" value="${esc(r.actions?.unsloth?.model_path||'')}" placeholder="model id as the server names it"><input type="text" class="uv" value="${esc(r.actions?.unsloth?.gguf_variant||'')}" placeholder="quant" style="min-width:110px"><input type="number" class="uc" value="${r.actions?.unsloth?.max_seq_length||''}" placeholder="context"></div></div>
+  <div class="row"><div class="rl"><b>Switch agents</b><div class="sub">Leave "—" to keep an agent as it is</div></div><div class="rc full" style="gap:10px">${agents.map(a=>`<label class="muted">${esc(a.emoji)} ${esc(a.name)} <select class="ag" data-a="${a.id}"><option value="">—</option><option value="__inherit__" ${r.actions?.agents?.[a.id]==='__inherit__'?'selected':''}>use default</option>${S.d.models.map(m=>`<option ${r.actions?.agents?.[a.id]===m.ref?'selected':''}>${esc(m.ref)}</option>`).join('')}</select></label>`).join('')}</div></div>
+  <div class="row"><div class="rl"><b>Why?</b></div><div class="rc full"><textarea class="snote" placeholder="e.g. big model overnight for research; small one by day">${esc(r.note||'')}</textarea></div></div>
+  <div class="row"><div class="rl"></div><div class="rc">${r.id?`<button class="btn" data-run="${r.id}">Run now</button>`:''}<button class="btn danger" data-del="${i}">Delete</button></div></div></div>`;
+ $('#page').innerHTML=`<p class="lead">Change models automatically at set times — for example a big model overnight when speed doesn't matter, and a small one by day so chats stay quick.</p>
+  <div class="group"><div class="row"><div class="rl"><b>${R.length} rule${R.length===1?'':'s'}</b><div class="sub">Rules run once per day at their time, while this machine is awake</div></div><div class="rc"><button class="btn" id="sa">Add Rule</button><button class="btn primary" id="ss">Save All</button></div></div></div>
+  ${R.map(card).join('')}<datalist id="ulist">${chat.map(m=>`<option value="${esc(m.id)}">`).join('')}</datalist>
+  <div class="foot" style="margin-top:14px">A rule can load a model on the local server, switch which model agents use, or both. If the server is off when a rule fires, that part is skipped and logged.</div>
+  ${helpGroup(['current','quant'])}`;
+ qa('.chip').forEach(c=>c.onclick=e=>{e.preventDefault();const i=c.querySelector('input');i.checked=!i.checked;c.classList.toggle('on',i.checked)});
+ const collect=()=>qa('[data-i]').map(el=>{const i=+el.dataset.i;const r=R[i]||{};const ag={};el.querySelectorAll('.ag').forEach(s=>{if(s.value)ag[s.dataset.a]=s.value});const um=el.querySelector('.um').value.trim();
+  return {id:r.id,name:el.querySelector('.sn').value,enabled:el.querySelector('.se').checked,time:el.querySelector('.st').value,days:[...el.querySelectorAll('.sd:checked')].map(x=>+x.value),note:el.querySelector('.snote').value,
+   actions:{agents:ag,unsloth:um?{model_path:um,gguf_variant:el.querySelector('.uv').value.trim(),max_seq_length:+el.querySelector('.uc').value||0}:null}}});
+ $('#sa').onclick=()=>{S.d.schedules=collect().concat([{name:'',enabled:false,time:'08:00',days:[0,1,2,3,4,5,6],actions:{agents:{}}}]);rSched();window.scrollTo(0,document.body.scrollHeight)};
+ $('#ss').onclick=async()=>{const j=await api('/api/schedules',{schedules:collect()});toast(j.ok?'Schedules saved':'Failed');if(j.ok){S.d.schedules=j.schedules;rSched()}};
+ qa('[data-del]').forEach(b=>b.onclick=()=>{const c=collect();c.splice(+b.dataset.del,1);S.d.schedules=c;rSched();toast('Removed — click Save All to keep')});
+ qa('[data-run]').forEach(b=>b.onclick=async()=>{if(!confirm('Run this rule now?'))return;b.disabled=true;const j=await api('/api/schedules/run',{id:b.dataset.run});b.disabled=false;toast(j.ok?'Ran: '+(j.results||[]).join('; '):'Failed');refresh()})}
+
+/* ---------------- Health & speed */
+function rHealth(){const h=S.d.health||{},u=h.unsloth||{};
+ $('#page').innerHTML=`<p class="lead">Is everything up, and how fast is each model? Speed tests send a tiny prompt, so they show the best case; real agent turns re-read 10–30k tokens of context first.</p>
+  <div class="gh">Services</div><div class="group">
+   <div class="row"><div class="rl"><b>OpenClaw gateway</b><div class="sub">127.0.0.1:18789 on this machine</div></div><div class="rc">${dot(h.gateway)}${h.gateway?'Running':'<span class="bad-t">Down — run openclaw gateway restart</span>'}</div></div>
+   ${u.provider?`<div class="row"><div class="rl"><b>${esc(u.provider)}</b><div class="sub mono">${esc(u.url||'')}</div></div><div class="rc">${dot(u.ok)}${u.ok?'Running'+(u.active?' · '+esc(u.active):''):'<span class="bad-t">'+esc(u.error||'down')+'</span>'}</div></div>`:''}
+   ${(h.others||[]).map(o=>`<div class="row"><div class="rl"><b>${esc(o.id)}</b><div class="sub mono">${esc(o.url||'')}</div></div><div class="rc">${dot(o.ok)}${o.ok?'Reachable':'<span class="bad-t">Unreachable</span>'}</div></div>`).join('')}
+  </div><div class="foot">Checked every 15 s. Last check: ${S.d.polledAt?new Date(S.d.polledAt*1000).toLocaleTimeString():'—'}.</div>
+  <div class="gh">Speed test</div><div class="group">${S.d.models.map(m=>{const k='h_'+kid(m.ref);return `<div class="row"><div class="rl"><b class="mono">${esc(m.ref)}</b></div><div class="rc"><span class="muted" id="${k}"></span><button class="btn" data-ht="${esc(m.ref)}" data-o="${k}">Test</button></div></div>`}).join('')}</div>
+  <div class="foot">Rule of thumb: a real agent turn re-reads 10–30k tokens before the first word, so multiply the first-word time here by a lot. If a model is unbearably slow on real turns, give that agent a smaller context copy, a smaller prompt budget, or a smaller model.</div>
+  ${helpGroup(['ttft','tps','context'])}`;
+ qa('[data-ht]').forEach(b=>b.onclick=()=>speed(b.dataset.ht,b.dataset.o,b))}
+
+/* ---------------- Log */
+function rLog(){$('#page').innerHTML=`<p class="lead">Every change made from this panel or by a schedule, newest first.</p><div class="group">${S.d.log.map(l=>`<div class="row"><div class="rl"><div class="sub mono">${esc(l.t)}</div>${esc(l.msg)}</div></div>`).join('')||'<div class="row muted">Nothing yet.</div>'}</div>`}
+
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-sync]');if(!b)return;b.disabled=true;const j=await api('/api/sync-context',{});b.disabled=false;
+ if(!j.ok)return toast('Sync failed: '+(j.msg||j.error));const n=(j.changed||[]).length;toast(n?`Synced ${n} entr${n===1?'y':'ies'} to ${fmt(j.loaded)} tokens: ${j.changed.join('; ')}`:`Already in sync at ${fmt(j.loaded)} tokens`+((j.skippedCopies||[]).length?` (kept smaller copies: ${j.skippedCopies.join(', ')})`:''));refresh()});
+boot().catch(e=>{if(e.message!=='login required')toast(e.message)});
+</script>
+</body>
+</html>

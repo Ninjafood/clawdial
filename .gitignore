@@ -1,0 +1,9 @@
+# runtime data — never commit
+auth.json
+sessions.json
+state.json
+config.json
+*.log
+__pycache__/
+.DS_Store
+docs/media/raw/
