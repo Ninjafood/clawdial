@@ -793,6 +793,22 @@ def sessions_view(fresh=False):
     return out
 
 
+def gateway_restart():
+    rc, out = run_oc(["gateway", "restart"], timeout=120)
+    if rc != 0:
+        log_event("❌ Gateway restart failed: %s" % out[-160:])
+        return False, out[-300:]
+    up = False
+    for _ in range(30):
+        time.sleep(1)
+        if port_open("127.0.0.1", 18789):
+            up = True
+            break
+    log_event("♻️ Gateway restarted" + ("" if up else " — but it isn't listening on 18789 yet"))
+    SESS["at"] = 0
+    return up, "gateway restarted" if up else "restart issued, but the gateway hasn't come back on 18789 yet — check openclaw gateway status"
+
+
 def session_reset(agent):
     r = subprocess.run([OPENCLAW, "agent", "--agent", agent, "--message", "/new"], capture_output=True, text=True,
                        timeout=120, cwd=OC_HOME, env={**os.environ, "PATH": ENV_PATH})
@@ -1211,6 +1227,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/agent/tools":
             ok, msg = update_tools(str(b.get("agent", "")), b.get("profile") or "")
             return self._send(200 if ok else 400, {"ok": ok, "msg": msg})
+        if path == "/api/gateway/restart":
+            ok, msg = gateway_restart()
+            return self._send(200 if ok else 500, {"ok": ok, "msg": msg})
         if path == "/api/session/reset":
             ok, msg = session_reset(str(b.get("agent", "")))
             return self._send(200 if ok else 400, {"ok": ok, "msg": msg})

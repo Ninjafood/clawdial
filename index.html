@@ -189,7 +189,7 @@ function rOverview(){const d=S.d,h=d.health||{},u=h.unsloth||{};
  const desk=u.ok?`<b class="ok-t">Online</b>${u.active?' — '+esc(u.active)+' loaded':''}`:`<b class="bad-t">Offline</b> — ${u.hostUp===false?'the machine isn\'t reachable':u.portOpen===false?'machine is up, but the server isn\'t running':esc(u.error||'not reachable')}`;
  $('#page').innerHTML=`<p class="lead">What your agents are using right now, and whether the machines behind them are up. Change things in the other sections.</p>
  <div class="gh">Status</div><div class="group">
-  <div class="row"><div class="rl"><b>OpenClaw gateway</b><div class="sub">The service that runs every agent</div></div><div class="rc">${dot(h.gateway)}${h.gateway?'Running':'<span class="bad-t">Down</span>'}</div></div>
+  <div class="row"><div class="rl"><b>OpenClaw gateway</b><div class="sub">The service that runs every agent</div></div><div class="rc">${dot(h.gateway)}${h.gateway?'Running':'<span class="bad-t">Down</span>'}<button class="btn" data-gwrestart>Restart</button></div></div>
   ${u.provider?`<div class="row"><div class="rl"><b>${esc(u.provider)} <span class="tag">${esc(KIND[u.kind]||u.kind||'')}</span></b><div class="sub mono">${esc((u.url||'').replace(/^https?:\/\//,''))}</div></div><div class="rc">${dot(u.ok)}${desk}${u.ok&&u.context?' <button class="btn" data-sync>Sync context</button>':''}</div></div>`:''}
   ${(h.others||[]).map(o=>`<div class="row"><div class="rl"><b>${esc(o.id)} <span class="tag">${esc(KIND[o.kind]||o.kind)}</span></b><div class="sub mono">${esc((o.url||'').replace(/^https?:\/\//,''))}</div></div><div class="rc">${dot(o.ok)}${o.ok?'Reachable':'<span class="bad-t">Unreachable</span>'}</div></div>`).join('')}
  </div><div class="foot">${u.provider&&!u.ok?`While <b>${esc(u.provider)}</b> is offline, every agent that uses one of its models can\'t answer. Start the server and load a model, then Refresh.`:'The first row is the local server the panel can inspect (loaded model, context). The others are checked for reachability only.'}</div>
@@ -445,7 +445,7 @@ function rSched(){const R=S.d.schedules;const agents=S.d.agents.agents;const cha
 function rHealth(){const h=S.d.health||{},u=h.unsloth||{};
  $('#page').innerHTML=`<p class="lead">Is everything up, and how fast is each model? Speed tests send a tiny prompt, so they show the best case; real agent turns re-read 10–30k tokens of context first.</p>
   <div class="gh">Services</div><div class="group">
-   <div class="row"><div class="rl"><b>OpenClaw gateway</b><div class="sub">127.0.0.1:18789 on this machine</div></div><div class="rc">${dot(h.gateway)}${h.gateway?'Running':'<span class="bad-t">Down — run openclaw gateway restart</span>'}</div></div>
+   <div class="row"><div class="rl"><b>OpenClaw gateway</b><div class="sub">127.0.0.1:18789 on this machine</div></div><div class="rc">${dot(h.gateway)}${h.gateway?'Running':'<span class="bad-t">Down</span>'}<button class="btn" data-gwrestart>Restart</button></div></div>
    ${u.provider?`<div class="row"><div class="rl"><b>${esc(u.provider)}</b><div class="sub mono">${esc(u.url||'')}</div></div><div class="rc">${dot(u.ok)}${u.ok?'Running'+(u.active?' · '+esc(u.active):''):'<span class="bad-t">'+esc(u.error||'down')+'</span>'}</div></div>`:''}
    ${(h.others||[]).map(o=>`<div class="row"><div class="rl"><b>${esc(o.id)}</b><div class="sub mono">${esc(o.url||'')}</div></div><div class="rc">${dot(o.ok)}${o.ok?'Reachable':'<span class="bad-t">Unreachable</span>'}</div></div>`).join('')}
   </div><div class="foot">Checked every 15 s. Last check: ${S.d.polledAt?new Date(S.d.polledAt*1000).toLocaleTimeString():'—'}.</div>
@@ -457,7 +457,8 @@ function rHealth(){const h=S.d.health||{},u=h.unsloth||{};
 /* ---------------- Log */
 function rLog(){$('#page').innerHTML=`<p class="lead">Every change made from this panel or by a schedule, newest first.</p><div class="group">${S.d.log.map(l=>`<div class="row"><div class="rl"><div class="sub mono">${esc(l.t)}</div>${esc(l.msg)}</div></div>`).join('')||'<div class="row muted">Nothing yet.</div>'}</div>`}
 
-document.addEventListener('click',async e=>{const b=e.target.closest('[data-sync]');if(!b)return;b.disabled=true;const j=await api('/api/sync-context',{});b.disabled=false;
+document.addEventListener('click',async e=>{const g=e.target.closest('[data-gwrestart]');if(g){if(!confirm('Restart the OpenClaw gateway?\n\nEvery agent pauses for ~10 seconds; in-flight replies are lost. Use this after changing provider keys or if agents stop responding.'))return;g.disabled=true;g.textContent='Restarting…';const j=await api('/api/gateway/restart',{});g.disabled=false;g.textContent='Restart';toast(j.ok?'Gateway restarted':'Restart problem: '+(j.msg||j.error));await api('/api/health?fresh=1');refresh();return}
+ const b=e.target.closest('[data-sync]');if(!b)return;b.disabled=true;const j=await api('/api/sync-context',{});b.disabled=false;
  if(!j.ok)return toast('Sync failed: '+(j.msg||j.error));const n=(j.changed||[]).length;toast(n?`Synced ${n} entr${n===1?'y':'ies'} to ${fmt(j.loaded)} tokens: ${j.changed.join('; ')}`:`Already in sync at ${fmt(j.loaded)} tokens`+((j.skippedCopies||[]).length?` (kept smaller copies: ${j.skippedCopies.join(', ')})`:''));refresh()});
 boot().catch(e=>{if(e.message!=='login required')toast(e.message)});
 </script>
