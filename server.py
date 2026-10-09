@@ -44,6 +44,9 @@ DEFAULTS = {
     "gateway_restart_cmd": "",                             # optional shell command to restart the gateway (e.g. systemctl --user restart openclaw)
     "gateway_launchd_label": "ai.openclaw.gateway",       # macOS fallback when the openclaw CLI refuses
     "watch_logins": [],                                    # macOS user accounts that must stay logged in (e.g. a dedicated iMessage user)
+    "pause_extra_launchd": [],                             # macOS launchd labels stopped/started together with the gateway on Pause (e.g. a voice bridge)
+    "pause_cmd": "",                                       # optional shell command for Pause instead of `openclaw gateway stop`
+    "resume_cmd": "",                                      # optional shell command for Resume instead of `openclaw gateway start`
 }
 
 
@@ -102,7 +105,12 @@ def load_state():
     st.setdefault("schedules", [])
     st.setdefault("log", [])
     st.setdefault("lastRun", {})
+    st.setdefault("paused", None)
     return st
+
+
+def is_paused():
+    return bool(load_state().get("paused"))
 
 
 def log_event(msg):
@@ -822,6 +830,90 @@ def gateway_restart():
     return up, "gateway restarted" if up else "restart issued, but the gateway hasn't come back on 18789 yet — check openclaw gateway status"
 
 
+def _launchd(label, action):
+    """Unload (stop) or load (start) a macOS LaunchAgent so KeepAlive doesn't bring it straight back."""
+    uid = os.getuid()
+    if action == "stop":
+        cmd = ["launchctl", "bootout", "gui/%d/%s" % (uid, label)]
+    else:
+        cmd = ["launchctl", "bootstrap", "gui/%d" % uid, os.path.expanduser("~/Library/LaunchAgents/%s.plist" % label)]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    out = (r.stdout + r.stderr).strip()
+    ok = r.returncode == 0 or "already" in out.lower() or ("No such process" in out and action == "stop")
+    return ok, out
+
+
+def _service(action):
+    """action = 'stop' | 'start' for the gateway: custom command, else the openclaw CLI, else launchd directly."""
+    custom = CFG.get("pause_cmd" if action == "stop" else "resume_cmd")
+    if custom:
+        r = subprocess.run(custom, shell=True, capture_output=True, text=True, timeout=120, env={**os.environ, "PATH": ENV_PATH})
+        return r.returncode == 0, (r.stdout + r.stderr).strip()
+    rc, out = run_oc(["gateway", action], timeout=120)
+    if rc != 0 and sys.platform == "darwin":
+        return _launchd(CFG.get("gateway_launchd_label", "ai.openclaw.gateway"), action)
+    return rc == 0, out
+
+
+def openclaw_pause():
+    """Stop the gateway (and any extra services) so nothing talks to the model server; hold schedules and auto-sync."""
+    ok, out = _service("stop")
+    if not ok:
+        log_event("❌ Pause failed: %s" % out[-160:])
+        return False, out[-300:]
+    notes = []
+    if sys.platform == "darwin":
+        for label in CFG.get("pause_extra_launchd") or []:
+            ok2, out2 = _launchd(label, "stop")
+            notes.append(("stopped %s" if ok2 else "couldn't stop %s: " + out2[-80:]) % label)
+    for _ in range(20):
+        if not port_open("127.0.0.1", 18789):
+            break
+        time.sleep(1)
+    still_up = port_open("127.0.0.1", 18789)
+    with LOCK:
+        st = load_state()
+        st["paused"] = {"at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+        write_json(STATE_FILE, st)
+    log_event("⏸ OpenClaw paused — gateway stopped; schedules and context auto-sync are on hold" + ("; " + ", ".join(notes) if notes else ""))
+    SESS["at"] = 0
+    try:
+        poll_once()
+    except Exception:  # noqa: BLE001
+        pass
+    msg = "paused — the gateway is stopped" if not still_up else "pause issued, but something is still listening on 18789 — check openclaw gateway status"
+    return not still_up, msg + ("; " + ", ".join(notes) if notes else "")
+
+
+def openclaw_resume():
+    ok, out = _service("start")
+    if not ok:
+        log_event("❌ Resume failed: %s" % out[-160:])
+        return False, out[-300:]
+    notes = []
+    if sys.platform == "darwin":
+        for label in CFG.get("pause_extra_launchd") or []:
+            ok2, out2 = _launchd(label, "start")
+            notes.append(("started %s" if ok2 else "couldn't start %s: " + out2[-80:]) % label)
+    up = False
+    for _ in range(30):
+        time.sleep(1)
+        if port_open("127.0.0.1", 18789):
+            up = True
+            break
+    with LOCK:
+        st = load_state()
+        st["paused"] = None
+        write_json(STATE_FILE, st)
+    log_event("▶️ OpenClaw resumed" + ("" if up else " — but the gateway isn't listening on 18789 yet") + ("; " + ", ".join(notes) if notes else ""))
+    SESS["at"] = 0
+    try:
+        poll_once()
+    except Exception:  # noqa: BLE001
+        pass
+    return up, ("resumed — agents are back" if up else "start issued, but the gateway hasn't come back on 18789 yet") + ("; " + ", ".join(notes) if notes else "")
+
+
 def session_reset(agent):
     r = subprocess.run([OPENCLAW, "agent", "--agent", agent, "--message", "/new"], capture_output=True, text=True,
                        timeout=120, cwd=OC_HOME, env={**os.environ, "PATH": ENV_PATH})
@@ -864,7 +956,8 @@ def poll_once():
             st["lastDesktop"] = {"active": us.get("active"), "context": us.get("context"),
                                  "seen": datetime.now().strftime("%Y-%m-%d %H:%M")}
             write_json(STATE_FILE, st)
-        sync_loaded_context(us)
+        if not st.get("paused"):
+            sync_loaded_context(us)
     else:
         url = h.get("unsloth", {}).get("url") or ""
         host = url.split("//")[-1].split("/")[0].split(":")[0]
@@ -1077,7 +1170,7 @@ def scheduler_loop():
             now = datetime.now()
             hm, today, dow = now.strftime("%H:%M"), now.strftime("%Y-%m-%d"), now.weekday()
             st = load_state()
-            for rule in st["schedules"]:
+            for rule in (st["schedules"] if not st.get("paused") else []):
                 if not rule.get("enabled"):
                     continue
                 if rule.get("time") == hm and dow in rule.get("days", list(range(7))):
@@ -1209,7 +1302,7 @@ class Handler(BaseHTTPRequestHandler):
                                     "servers": servers, "localProvider": lp(cfg),
                                     "desktopModels": desk, "desktopDown": not us.get("ok"), "unsloth": us,
                                     "health": cached("health"), "polledAt": CACHE["at"],
-                                    "schedules": st["schedules"], "lastRun": st["lastRun"], "log": st["log"][:100],
+                                    "paused": st.get("paused"), "schedules": st["schedules"], "lastRun": st["lastRun"], "log": st["log"][:100],
                                     "syncContext": st.get("syncContext", True), "sessions": SESS["data"]})
         if path == "/api/sessions":
             return self._send(200, {"sessions": sessions_view("fresh" in self.path), "at": SESS["at"]})
@@ -1278,6 +1371,14 @@ class Handler(BaseHTTPRequestHandler):
             if agents_busy() and not b.get("force"):
                 return self._send(409, {"ok": False, "busy": True, "msg": "an agent is mid-turn; restarting now would drop its reply"})
             ok, msg = gateway_restart()
+            return self._send(200 if ok else 500, {"ok": ok, "msg": msg})
+        if path == "/api/openclaw/pause":
+            if agents_busy() and not b.get("force"):
+                return self._send(409, {"ok": False, "busy": True, "msg": "an agent is mid-turn; pausing now would drop its reply"})
+            ok, msg = openclaw_pause()
+            return self._send(200 if ok else 500, {"ok": ok, "msg": msg})
+        if path == "/api/openclaw/resume":
+            ok, msg = openclaw_resume()
             return self._send(200 if ok else 500, {"ok": ok, "msg": msg})
         if path == "/api/session/reset":
             ok, msg = session_reset(str(b.get("agent", "")))
