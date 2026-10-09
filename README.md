@@ -64,7 +64,7 @@ Honesty note: Unsloth Studio and plain OpenAI-compatible endpoints are what I ru
 Requirements: Python 3.9+, the `openclaw` CLI on the same machine as the gateway, a modern browser. That's it — the server is standard library only.
 
 ```bash
-git clone https://github.com/YOUR_USER/clawdial.git
+git clone https://github.com/Ninjafood/clawdial.git
 cd clawdial
 cp config.example.json config.json      # optional; defaults are fine for a normal OpenClaw install
 python3 -I server.py --set-password     # pick a login password
