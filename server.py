@@ -875,6 +875,20 @@ def poll_once():
     CACHE.update({"unsloth": us, "health": h, "at": time.time()})
 
 
+def agents_busy():
+    """True if any agent is mid-turn. Config writes during a turn make OpenClaw discard that turn's reply."""
+    try:
+        r = subprocess.run([OPENCLAW, "sessions", "list", "--all-agents", "--active", "2", "--json"], capture_output=True, text=True,
+                           timeout=15, cwd=OC_HOME, env={**os.environ, "PATH": ENV_PATH})
+        raw = r.stdout
+        i = raw.find("[") if raw.lstrip().startswith("[") else raw.find("{")
+        d = json.loads(raw[i:])
+        items = d if isinstance(d, list) else (d.get("sessions") or d.get("items") or [])
+        return any(x.get("status") in ("running", "active", "streaming") for x in items)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def sync_loaded_context(us):
     """Keep the loaded desktop model's OpenClaw entry in step with the context Unsloth actually loaded."""
     st = load_state()
@@ -893,6 +907,8 @@ def sync_loaded_context(us):
             changed.append("%s %s→%s" % (ent["id"], ent.get("contextWindow"), loaded))
             models[i] = {**ent, "contextWindow": loaded}
     if changed:
+        if agents_busy():
+            return  # try again on the next poll; a config write now would drop an in-flight reply
         apply_patch({"models": {"providers": {name: {"models": models}}}},
                     "🔄 Auto-synced context to %s (desktop loaded %s): %s" % (loaded, active, "; ".join(changed)))
 
