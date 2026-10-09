@@ -95,7 +95,7 @@ Elsewhere, run it under systemd, a tmux session, whatever you like — it's one 
 }
 ```
 
-`backend_hint` overrides auto-detection if it guesses wrong. `gateway_restart_cmd` is what the Restart button runs if you don't use the macOS LaunchAgent (e.g. `systemctl --user restart openclaw`). Environment variables `MODEL_UI_PORT`, `OPENCLAW_BIN`, `OPENCLAW_HOME`, `MODEL_UI_DATA` (where `auth.json`/`state.json` live) do the same job.
+`backend_hint` overrides auto-detection if it guesses wrong. `watch_logins` lists macOS accounts that must stay logged in (a dedicated iMessage user, say) — the panel shows a red row when one isn't. `gateway_restart_cmd` is what the Restart button runs if you don't use the macOS LaunchAgent (e.g. `systemctl --user restart openclaw`). Environment variables `MODEL_UI_PORT`, `OPENCLAW_BIN`, `OPENCLAW_HOME`, `MODEL_UI_DATA` (where `auth.json`/`state.json` live) do the same job.
 
 ## Security — read this bit
 

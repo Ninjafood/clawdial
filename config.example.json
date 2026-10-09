@@ -9,5 +9,6 @@
   ],
   "backend_hint": {},
   "gateway_restart_cmd": "",
-  "gateway_launchd_label": "ai.openclaw.gateway"
+  "gateway_launchd_label": "ai.openclaw.gateway",
+  "watch_logins": []
 }

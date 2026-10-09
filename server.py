@@ -43,6 +43,7 @@ DEFAULTS = {
     "backend_hint": {},                                    # provider id -> unsloth|lmstudio|ollama|generic (optional)
     "gateway_restart_cmd": "",                             # optional shell command to restart the gateway (e.g. systemctl --user restart openclaw)
     "gateway_launchd_label": "ai.openclaw.gateway",       # macOS fallback when the openclaw CLI refuses
+    "watch_logins": [],                                    # macOS user accounts that must stay logged in (e.g. a dedicated iMessage user)
 }
 
 
@@ -974,7 +975,15 @@ def health(us=None):
         except Exception:  # noqa: BLE001
             pass
         others.append({"id": pname, "ok": ok, "url": base, "kind": detect_backend(cfg, pname)})
-    return {"gateway": port_open("127.0.0.1", 18789),
+    logins = []
+    for user in CFG.get("watch_logins") or []:
+        try:
+            w = subprocess.run(["who"], capture_output=True, text=True, timeout=5).stdout
+            on = any(l.split()[0] == user and "console" in l for l in w.splitlines() if l.strip())
+        except Exception:  # noqa: BLE001
+            on = None
+        logins.append({"user": user, "loggedIn": on})
+    return {"gateway": port_open("127.0.0.1", 18789), "logins": logins,
             "unsloth": {"ok": us.get("ok"), "active": us.get("active"), "error": us.get("error"), "url": root,
                         "provider": name, "kind": us.get("kind")},
             "others": others, "mac": next((o for o in others if o["id"] == "mac"), {"ok": None, "url": ""})}
