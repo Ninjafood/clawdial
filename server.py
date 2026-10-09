@@ -999,7 +999,17 @@ def health(us=None):
         except Exception:  # noqa: BLE001
             on = None
         logins.append({"user": user, "loggedIn": on})
-    return {"gateway": port_open("127.0.0.1", 18789), "logins": logins,
+    stale = None
+    try:
+        cfg_m = os.path.getmtime(OC_CONFIG)
+        ps = subprocess.run(["sh", "-c", "lsof -nP -iTCP:18789 -sTCP:LISTEN -t 2>/dev/null | head -1 | xargs -I{} ps -o lstart= -p {}"],
+                            capture_output=True, text=True, timeout=8).stdout.strip()
+        if ps:
+            started = time.mktime(time.strptime(ps, "%a %b %d %H:%M:%S %Y"))
+            stale = cfg_m > started
+    except Exception:  # noqa: BLE001
+        stale = None
+    return {"gateway": port_open("127.0.0.1", 18789), "logins": logins, "configChangedSinceRestart": stale,
             "unsloth": {"ok": us.get("ok"), "active": us.get("active"), "error": us.get("error"), "url": root,
                         "provider": name, "kind": us.get("kind")},
             "others": others, "mac": next((o for o in others if o["id"] == "mac"), {"ok": None, "url": ""})}
