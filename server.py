@@ -224,9 +224,41 @@ def agents_view(cfg):
             "toolProfile": ((e.get("tools") or {}).get("profile")) or "", "workspace": e.get("workspace", ""),
             "theme": ident.get("theme", ""),
         })
+    hb = defaults.get("heartbeat") or {}
     return {"default": {"model": d_primary, "fallbacks": d_fallbacks,
-                        "thinking": defaults.get("thinkingDefault") or "", "promptBudget": defaults.get("bootstrapTotalMaxChars")},
+                        "thinking": defaults.get("thinkingDefault") or "", "promptBudget": defaults.get("bootstrapTotalMaxChars"),
+                        "heartbeat": {"agentId": hb.get("agentId") or "", "every": hb.get("every") or "", "model": hb.get("model") or "",
+                                      "activeHours": hb.get("activeHours") or {}, "lightContext": bool(hb.get("lightContext")),
+                                      "isolatedSession": bool(hb.get("isolatedSession")), "target": hb.get("target") or "", "to": hb.get("to") or ""}},
             "agents": rows}
+
+
+def set_heartbeat(b):
+    """Update agents.defaults.heartbeat: empty strings clear a field (OpenClaw's patch treats null as delete)."""
+    cfg = oc_config()
+    hb = {}
+    refs = {m["ref"] for m in model_catalog(cfg)}
+    model = str(b.get("model") or "").strip()
+    if model and model not in refs:
+        return False, "unknown model " + model
+    hb["model"] = model or None
+    every = str(b.get("every") or "").strip()
+    if every and not re.match(r"^\d+\s*(ms|s|m|h|d)?$", every):
+        return False, "cadence looks wrong — use something like 30m, 2h or 90s"
+    hb["every"] = every or None
+    owner = str(b.get("agentId") or "").strip()
+    if owner and owner not in cfg.get("agents", {}).get("entries", {}):
+        return False, "unknown agent " + owner
+    hb["agentId"] = owner or None
+    ah = b.get("activeHours") or {}
+    start, end = str(ah.get("start") or "").strip(), str(ah.get("end") or "").strip()
+    if (start and not end) or (end and not start):
+        return False, "active hours need both a start and an end (HH:MM)"
+    hb["activeHours"] = {"start": start, "end": end, **({"timezone": ah["timezone"]} if ah.get("timezone") else {})} if start else None
+    hb["lightContext"] = True if b.get("lightContext") else None
+    hb["isolatedSession"] = True if b.get("isolatedSession") else None
+    why = "Heartbeat: %s%s%s" % (("every " + every) if every else "default cadence", (" on " + model) if model else " on the owner's model", (" owner " + owner) if owner else "")
+    return apply_patch({"agents": {"defaults": {"heartbeat": hb}}}, why)
 
 
 def desktop_catalog_entry(cfg, model_id):
@@ -1379,6 +1411,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/agent":
             ok, msg = set_agent_model(b.get("agent", ""), b.get("model") or "", [f for f in b.get("fallbacks", []) if f], b.get("note"),
                                       b.get("thinking"), b.get("promptBudget"))
+            return self._send(200 if ok else 400, {"ok": ok, "msg": msg})
+        if path == "/api/heartbeat":
+            ok, msg = set_heartbeat(b)
             return self._send(200 if ok else 400, {"ok": ok, "msg": msg})
         if path == "/api/agents/set-model":
             ok, msg = set_all_agents_model(str(b.get("model", "")), [str(a) for a in (b.get("agents") or [])],

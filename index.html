@@ -127,7 +127,7 @@ const TABS=[
  ['overview','Overview','🏠','#5856d6'],['agents','Agents','🤖','#ff9500'],['models','Models & Context','🧠','#af52de'],
  ['gpu','Servers','🖥️','#34c759'],['sched','Schedules','🗓️','#ff2d55'],['health','Health & Speed','❤️','#ff3b30'],['log','Change Log','📜','#8e8e93']];
 
-const HELP={
+const HELP={heartbeat:['Heartbeat','A timer that wakes one agent on a schedule (OpenClaw\'s default is every 30 minutes) so it can check on things without being asked. It only does real work when that agent\'s workspace has a <b>HEARTBEAT.md</b> describing what to check; otherwise the tick is a no-op. Every real tick is a full model turn, so its model choice matters: picking a model that isn\'t the one loaded on your server forces a model swap twice an hour.'],
  context:['Context','How much conversation (in tokens, roughly ¾ of a word each) OpenClaw sends to the model each turn. Bigger = remembers more, but every turn is slower, because the model re-reads it all. Keep it at or below what the server actually loaded — see Servers — or requests fail.'],
  maxout:['Max output','The longest reply a model may write in one turn. 2,048–4,096 is plenty for chat; raise it only for long documents.'],
  fallback:['Fallbacks','Tried in order only when the main model <b>errors</b> (desktop off, server crashed). Not used when the main model is merely slow.'],
@@ -219,6 +219,21 @@ function wireTiles(){const W=144;let open=null;
   t.querySelector('[data-tm]').onclick=()=>{close();openManage(t.dataset.tile)};const xb=t.querySelector('[data-tx]');if(xb)xb.onclick=()=>{close();openDelete(t.dataset.tile)}})}
 function modal(title,body,footer){const ov=document.createElement('div');ov.className='ov';ov.innerHTML=`<div class="sheet" role="dialog"><div class="hd"><b>${title}</b><button class="btn" data-close>Close</button></div><div class="bd">${body}</div><div class="ft">${footer||''}</div></div>`;
  document.body.appendChild(ov);const closeM=()=>ov.remove();ov.querySelector('[data-close]').onclick=closeM;ov.addEventListener('click',e=>{if(e.target===ov)closeM()});document.addEventListener('keydown',function k(e){if(e.key==='Escape'){closeM();document.removeEventListener('keydown',k)}});return {ov,close:closeM}}
+function heartbeatGroup(){const d=S.d;const hb=(d.agents.default||{}).heartbeat||{};const u=d.unsloth||{};const agents=d.agents.agents||[];const models=d.models||[];
+ const owner=agents.find(a=>a.id===hb.agentId)||agents.find(a=>a.id==='main')||agents[0]||{};const effModel=hb.model||owner.effective||d.agents.default.model||'';const em=models.find(m=>m.ref===effModel)||{};
+ const swap=em.provider===d.localProvider&&u.ok&&u.active&&effModel&&!effModel.endsWith('/'+u.active)&&!effModel.endsWith('/current');
+ return `<div class="gh">💓 Heartbeat <span class="tag">${esc(hb.every||'30m')}</span><span class="tag mono">${esc(effModel.split('/').slice(-1)[0]||'')}</span>${hb.model?'':'<span class="tag">inherits owner\'s model</span>'}</div><div class="group">
+  <div class="row"><div class="rl"><b>Owner</b><div class="sub">Which agent wakes up. It needs a HEARTBEAT.md in its workspace to actually do anything.</div></div><div class="rc"><select id="hb_owner"><option value="">main (OpenClaw default)</option>${agents.map(a=>`<option value="${esc(a.id)}" ${a.id===hb.agentId?'selected':''}>${esc(a.emoji||'')} ${esc(a.name)}</option>`).join('')}</select></div></div>
+  <div class="row"><div class="rl"><b>Every</b><div class="sub">How often it ticks — 30m, 2h, 24h. Blank means OpenClaw's default of 30 minutes.</div></div><div class="rc"><input type="text" id="hb_every" value="${esc(hb.every||'')}" placeholder="30m" style="width:90px"></div></div>
+  <div class="row"><div class="rl"><b>Model</b><div class="sub">Blank inherits the owner's model, which keeps everything on one warm server.${swap?` <span class="warn-t">Right now that is <b>${esc(em.id||effModel)}</b>, but the server has <b>${esc(u.active)}</b> loaded — every tick will force a swap.</span>`:''}</div></div><div class="rc"><select id="hb_model"><option value="">inherit (${esc(owner.effective||d.agents.default.model||'')})</option>${models.map(m=>`<option value="${esc(m.ref)}" ${m.ref===hb.model?'selected':''}>${esc(m.ref)}</option>`).join('')}</select></div></div>
+  <div class="row"><div class="rl"><b>Active hours</b><div class="sub">Only tick between these times (24h clock). Blank both to run around the clock.</div></div><div class="rc"><input type="text" id="hb_start" value="${esc((hb.activeHours||{}).start||'')}" placeholder="08:00" style="width:72px"> to <input type="text" id="hb_end" value="${esc((hb.activeHours||{}).end||'')}" placeholder="23:00" style="width:72px"></div></div>
+  <div class="row"><div class="rl"><b>Light context</b><div class="sub">Send a trimmed prompt on heartbeat ticks — cheaper on a slow server, but the agent sees less.</div></div><div class="rc"><label><input type="checkbox" id="hb_light" ${hb.lightContext?'checked':''}> on</label></div></div>
+  <div class="row"><div class="rl"><b>Isolated session</b><div class="sub">Run each tick in its own throwaway conversation instead of the owner's main one.</div></div><div class="rc"><label><input type="checkbox" id="hb_iso" ${hb.isolatedSession?'checked':''}> on</label></div></div>
+  <div class="row"><div class="rl"><div class="sub">Changes apply without a restart.</div></div><div class="rc"><button class="btn primary" id="hb_save">Save heartbeat</button></div></div>
+ </div>`}
+function wireHeartbeat(){const b=$('#hb_save');if(!b)return;b.onclick=async()=>{b.disabled=true;b.textContent='Saving…';
+ const j=await api('/api/heartbeat',{agentId:$('#hb_owner').value,every:$('#hb_every').value,model:$('#hb_model').value,activeHours:{start:$('#hb_start').value,end:$('#hb_end').value},lightContext:$('#hb_light').checked,isolatedSession:$('#hb_iso').checked});
+ b.disabled=false;b.textContent='Save heartbeat';toast(j.ok?'Heartbeat updated':'Not saved: '+(j.msg||j.error));if(j.ok)refresh()}}
 function openUseForAll(ref){const d=S.d;const models=d.models||[];const agents=d.agents.agents||[];const u=d.unsloth||{};
  const sel=ref||(d.agents.default.model)||(models[0]&&models[0].ref)||'';
  const {ov,close}=modal('Set all agents to one model',`
@@ -314,10 +329,11 @@ function newAgentForm(){const d=S.d;
  </div><div class="foot">Creates <span class="mono">~/.openclaw/workspace-&lt;id&gt;/</span> with starter SOUL.md, AGENTS.md and USER.md you can edit. Nothing routes to a new agent until you bind a channel (e.g. <span class="mono">openclaw agents bind --agent &lt;id&gt; --bind telegram</span>) or talk to it from the OpenClaw dashboard.</div>`}
 function rAgents(){const d=S.d;
  $('#page').innerHTML=`<div class="row" style="padding:0 0 10px"><div class="rl"></div><div class="rc"><button class="btn" id="setall">Set all agents to…</button><button class="btn" id="addagent">Add Agent…</button></div></div><div id="naslot">${S.showNew?newAgentForm():''}</div><p class="lead">Each agent can use its own model, fallbacks, and reasoning level.${d.desktopDown&&d.localProvider?` <b>${esc(d.localProvider)} is offline right now</b>, so only already-configured models are listed; downloaded-but-unconfigured ones appear when it\'s back.`:''}</p>
- ${agentGroup(d.agents.default,true)}${d.agents.agents.map(a=>agentGroup(a,false)).join('')}
+ ${agentGroup(d.agents.default,true)}${heartbeatGroup()}${d.agents.agents.map(a=>agentGroup(a,false)).join('')}
  <div class="foot" style="margin-top:14px">Picking a model from the "downloaded" list adds it to OpenClaw automatically with a sensible context. Use <b>Health &amp; Speed</b> to measure what each one actually does on your hardware.</div>
- ${helpGroup(['tools','conv','context','fallback','thinking','budget','copy','current'])}`;
+ ${helpGroup(['heartbeat','tools','conv','context','fallback','thinking','budget','copy','current'])}`;
  $('#setall').onclick=()=>openUseForAll(null);
+ wireHeartbeat();
  wireAgentMgmt();
  qa('.chip').forEach(c=>c.onclick=e=>{e.preventDefault();const i=c.querySelector('input');i.checked=!i.checked;c.classList.toggle('on',i.checked)});
  qa('[data-copy]').forEach(b=>b.onclick=()=>{$('#cp_'+kid(b.dataset.agent)).classList.toggle('show')});

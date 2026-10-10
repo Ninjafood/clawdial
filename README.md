@@ -32,6 +32,8 @@ So this panel does three things I'd been doing badly by hand:
 
 **Health & Speed** — is everything up; time-to-first-word and tok/s per model.
 
+**Heartbeat** — see and change OpenClaw's periodic check-in: which agent owns it, how often, which model (inherit or pick one, with a warning if that forces a model swap on your server), active hours, light context.
+
 **Set all agents to one model** — a button on the Agents and Models pages opens a modal: pick a model, tick the agents, optionally make it the default and clear fallbacks, apply. One config write, no restart.
 
 **Pause / Resume** — one button on the Overview stops the gateway (and anything you list in `pause_extra_launchd`, like a voice bridge) so nothing talks to your model server while you load, swap or benchmark models. Schedules and context auto-sync hold too. Resume brings every agent back where it left off.
