@@ -909,7 +909,7 @@ def _service(action):
     if custom:
         r = subprocess.run(custom, shell=True, capture_output=True, text=True, timeout=120, env={**os.environ, "PATH": ENV_PATH})
         return r.returncode == 0, (r.stdout + r.stderr).strip()
-    rc, out = run_oc(["gateway", action], timeout=120)
+    rc, out = run_oc(["gateway", action] + (["--force"] if action == "stop" else []), timeout=120)  # stop refuses without --force
     if rc != 0 and sys.platform == "darwin":
         return _launchd(CFG.get("gateway_launchd_label", "ai.openclaw.gateway"), action)
     return rc == 0, out
