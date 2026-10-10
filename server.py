@@ -241,6 +241,34 @@ def desktop_catalog_entry(cfg, model_id):
     return None
 
 
+def set_all_agents_model(model, agents, clear_fallbacks=False, set_default=True):
+    """Point several agents (and optionally the default) at one model in a single validated config write."""
+    cfg = oc_config()
+    if model not in {m["ref"] for m in model_catalog(cfg)}:
+        return False, "unknown model " + model
+    entries = cfg.get("agents", {}).get("entries", {})
+    allow = {model: {}}
+    patch = {"agents": {"defaults": {"models": allow}, "entries": {}}}
+    done = []
+    for aid in agents or []:
+        e = entries.get(aid)
+        if not e:
+            continue
+        m = e.get("model")
+        fb = (m.get("fallbacks") if isinstance(m, dict) else []) or []
+        fb = [] if clear_fallbacks else [f for f in fb if f != model]
+        for f in fb:
+            allow.setdefault(f, {})
+        patch["agents"]["entries"][aid] = {"model": ({"primary": model, "fallbacks": fb} if fb else model)}
+        done.append(aid)
+    if not done and not set_default:
+        return False, "no agents selected"
+    if set_default:
+        patch["agents"]["defaults"]["model"] = {"primary": model, "fallbacks": []}
+    label = "Set %s for %s%s" % (model, ", ".join(done) if done else "no agents", " + default" if set_default else "")
+    return apply_patch(patch, label)
+
+
 def set_agent_model(agent, model, fallbacks, note, thinking=None, prompt_budget=None):
     cfg = oc_config()
     if agent != "__default__" and agent not in cfg.get("agents", {}).get("entries", {}):
@@ -1351,6 +1379,10 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/agent":
             ok, msg = set_agent_model(b.get("agent", ""), b.get("model") or "", [f for f in b.get("fallbacks", []) if f], b.get("note"),
                                       b.get("thinking"), b.get("promptBudget"))
+            return self._send(200 if ok else 400, {"ok": ok, "msg": msg})
+        if path == "/api/agents/set-model":
+            ok, msg = set_all_agents_model(str(b.get("model", "")), [str(a) for a in (b.get("agents") or [])],
+                                           bool(b.get("clearFallbacks")), bool(b.get("setDefault", True)))
             return self._send(200 if ok else 400, {"ok": ok, "msg": msg})
         if path == "/api/catalog/add":
             ok, msg = add_desktop_model(str(b.get("id", "")))
