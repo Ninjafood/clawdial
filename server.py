@@ -899,7 +899,10 @@ def _launchd(label, action):
         cmd = ["launchctl", "bootstrap", "gui/%d" % uid, os.path.expanduser("~/Library/LaunchAgents/%s.plist" % label)]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     out = (r.stdout + r.stderr).strip()
-    ok = r.returncode == 0 or "already" in out.lower() or ("No such process" in out and action == "stop")
+    # launchd's exit codes are unreliable (e.g. "Input/output error" when the job is already loaded), so check the job list instead
+    time.sleep(0.5)
+    listed = label in subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=30).stdout
+    ok = listed if action == "start" else not listed
     return ok, out
 
 
