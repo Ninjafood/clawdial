@@ -233,6 +233,42 @@ def agents_view(cfg):
             "agents": rows}
 
 
+def set_universal_fallbacks(fallbacks, apply_to_agents=True):
+    """Write one fallback chain to the default model and (optionally) to every agent that has its own model."""
+    cfg = oc_config()
+    refs = {m["ref"] for m in model_catalog(cfg)}
+    chain = []
+    for f in fallbacks or []:
+        f = str(f).strip()
+        if f and f not in chain:
+            chain.append(f)
+    for f in chain:
+        if f not in refs:
+            return False, "unknown model " + f
+    defaults = cfg.get("agents", {}).get("defaults", {})
+    dm = defaults.get("model")
+    d_primary = dm.get("primary") if isinstance(dm, dict) else dm
+    if not d_primary:
+        return False, "set a default model first"
+    allow = {d_primary: {}}
+    for f in chain:
+        allow[f] = {}
+    patch = {"agents": {"defaults": {"models": allow, "model": {"primary": d_primary, "fallbacks": [f for f in chain if f != d_primary]}}, "entries": {}}}
+    touched = []
+    if apply_to_agents:
+        for aid, e in cfg.get("agents", {}).get("entries", {}).items():
+            m = e.get("model")
+            primary = m.get("primary") if isinstance(m, dict) else m
+            if not primary:
+                continue  # inherits the default, so it gets the default chain
+            fb = [f for f in chain if f != primary]
+            allow.setdefault(primary, {})
+            patch["agents"]["entries"][aid] = {"model": ({"primary": primary, "fallbacks": fb} if fb else primary)}
+            touched.append(aid)
+    why = "Universal fallback → %s%s" % (" → ".join(chain) if chain else "none", (" (default + %s)" % ", ".join(touched)) if touched else " (default only)")
+    return apply_patch(patch, why)
+
+
 def set_heartbeat(b):
     """Update agents.defaults.heartbeat: empty strings clear a field (OpenClaw's patch treats null as delete)."""
     cfg = oc_config()
@@ -1414,6 +1450,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/agent":
             ok, msg = set_agent_model(b.get("agent", ""), b.get("model") or "", [f for f in b.get("fallbacks", []) if f], b.get("note"),
                                       b.get("thinking"), b.get("promptBudget"))
+            return self._send(200 if ok else 400, {"ok": ok, "msg": msg})
+        if path == "/api/fallbacks":
+            ok, msg = set_universal_fallbacks(b.get("fallbacks") or [], bool(b.get("applyToAgents", True)))
             return self._send(200 if ok else 400, {"ok": ok, "msg": msg})
         if path == "/api/heartbeat":
             ok, msg = set_heartbeat(b)

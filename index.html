@@ -219,6 +219,25 @@ function wireTiles(){const W=144;let open=null;
   t.querySelector('[data-tm]').onclick=()=>{close();openManage(t.dataset.tile)};const xb=t.querySelector('[data-tx]');if(xb)xb.onclick=()=>{close();openDelete(t.dataset.tile)}})}
 function modal(title,body,footer){const ov=document.createElement('div');ov.className='ov';ov.innerHTML=`<div class="sheet" role="dialog"><div class="hd"><b>${title}</b><button class="btn" data-close>Close</button></div><div class="bd">${body}</div><div class="ft">${footer||''}</div></div>`;
  document.body.appendChild(ov);const closeM=()=>ov.remove();ov.querySelector('[data-close]').onclick=closeM;ov.addEventListener('click',e=>{if(e.target===ov)closeM()});document.addEventListener('keydown',function k(e){if(e.key==='Escape'){closeM();document.removeEventListener('keydown',k)}});return {ov,close:closeM}}
+function fallbackGroup(){const d=S.d;const u=d.unsloth||{};const models=d.models||[];const agents=d.agents.agents||[];const def=d.agents.default||{};
+ const cur=def.fallbacks||[];const same=agents.filter(a=>a.inherits||JSON.stringify((a.fallbacks||[]).filter(f=>f!==a.model))===JSON.stringify(cur.filter(f=>f!==a.model)));const diff=agents.filter(a=>!same.includes(a));
+ const opt=(sel)=>`<option value="">— none —</option>${models.map(m=>`<option value="${esc(m.ref)}" ${m.ref===sel?'selected':''}>${esc(m.ref)}</option>`).join('')}`;
+ return `<div class="gh">🪂 Universal fallback ${cur.length?`<span class="tag mono">${esc(cur.map(x=>x.split('/').slice(-1)[0]).join(' → '))}</span>`:'<span class="tag">none</span>'}${diff.length?`<span class="tag warn">${diff.length} agent${diff.length>1?'s':''} differ</span>`:''}</div><div class="group">
+  <div class="row"><div class="rl"><b>What this does</b><div class="sub">When an agent's own model fails (server down, timeout, error), OpenClaw tries these in order. Saving writes the same chain to the default <i>and</i> to every agent that has its own model, so nobody is left without a net.${diff.length?` Right now <b>${esc(diff.map(a=>a.name).join(', '))}</b> ${diff.length>1?'have':'has'} a different chain; Save overwrites it.`:''}</div></div></div>
+  <div class="row"><div class="rl"><b>First fallback</b><div class="sub" id="fb_warn1"></div></div><div class="rc"><select id="fb_1">${opt(cur[0]||'')}</select></div></div>
+  <div class="row"><div class="rl"><b>Second fallback</b><div class="sub">Optional. Tried only if the first one fails too.</div></div><div class="rc"><select id="fb_2">${opt(cur[1]||'')}</select></div></div>
+  <div class="row"><div class="rl"><b>Apply to every agent</b><div class="sub">Untick to change only the default (agents set to "inherit" still follow it).</div></div><div class="rc"><label><input type="checkbox" id="fb_all" checked> yes</label></div></div>
+  <div class="row"><div class="rl"><div class="sub">A fallback on a <b>different</b> server (the Mac's local model, a cloud endpoint) is a real safety net. A fallback on the same server only helps for the odd timeout, and if it isn't the loaded model it will trigger a model swap right when that server is struggling.</div></div><div class="rc"><button class="btn primary" id="fb_save">Save fallback</button></div></div>
+ </div>`}
+function wireFallbacks(){const b=$('#fb_save');if(!b)return;const d=S.d;const u=d.unsloth||{};
+ const warn=()=>{const r=$('#fb_1').value;const m=(d.models||[]).find(x=>x.ref===r)||{};let w='';
+  if(r&&m.provider===d.localProvider){w=u.ok&&u.active&&!r.endsWith('/'+u.active)&&!r.endsWith('/current')?`Same server as the primaries, and not what it has loaded (<b>${esc(u.active)}</b>) — a failover will force a model swap.`:'Same server as the primaries — only covers timeouts, not that server being down.'}
+  else if(r)w='Different server from the local one — good: it still works when the desktop is off.';
+  $('#fb_warn1').innerHTML=w||'Pick the model to try first when an agent\'s own model fails.'};
+ $('#fb_1').onchange=warn;warn();
+ b.onclick=async()=>{b.disabled=true;b.textContent='Saving…';const fbs=[$('#fb_1').value,$('#fb_2').value].filter(Boolean);
+  const j=await api('/api/fallbacks',{fallbacks:fbs,applyToAgents:$('#fb_all').checked});b.disabled=false;b.textContent='Save fallback';
+  toast(j.ok?(fbs.length?'Fallback set everywhere':'Fallbacks cleared'):'Not saved: '+(j.msg||j.error));if(j.ok)refresh()}}
 function heartbeatGroup(){const d=S.d;const hb=(d.agents.default||{}).heartbeat||{};const u=d.unsloth||{};const agents=d.agents.agents||[];const models=d.models||[];
  const owner=agents.find(a=>a.id===hb.agentId)||agents.find(a=>a.id==='main')||agents[0]||{};const effModel=hb.model||owner.effective||d.agents.default.model||'';const em=models.find(m=>m.ref===effModel)||{};
  const swap=em.provider===d.localProvider&&u.ok&&u.active&&effModel&&!effModel.endsWith('/'+u.active)&&!effModel.endsWith('/current');
@@ -331,11 +350,12 @@ function newAgentForm(){const d=S.d;
  </div><div class="foot">Creates <span class="mono">~/.openclaw/workspace-&lt;id&gt;/</span> with starter SOUL.md, AGENTS.md and USER.md you can edit. Nothing routes to a new agent until you bind a channel (e.g. <span class="mono">openclaw agents bind --agent &lt;id&gt; --bind telegram</span>) or talk to it from the OpenClaw dashboard.</div>`}
 function rAgents(){const d=S.d;
  $('#page').innerHTML=`<div class="row" style="padding:0 0 10px"><div class="rl"></div><div class="rc"><button class="btn" id="setall">Set all agents to…</button><button class="btn" id="addagent">Add Agent…</button></div></div><div id="naslot">${S.showNew?newAgentForm():''}</div><p class="lead">Each agent can use its own model, fallbacks, and reasoning level.${d.desktopDown&&d.localProvider?` <b>${esc(d.localProvider)} is offline right now</b>, so only already-configured models are listed; downloaded-but-unconfigured ones appear when it\'s back.`:''}</p>
- ${agentGroup(d.agents.default,true)}${heartbeatGroup()}${d.agents.agents.map(a=>agentGroup(a,false)).join('')}
+ ${agentGroup(d.agents.default,true)}${fallbackGroup()}${heartbeatGroup()}${d.agents.agents.map(a=>agentGroup(a,false)).join('')}
  <div class="foot" style="margin-top:14px">Picking a model from the "downloaded" list adds it to OpenClaw automatically with a sensible context. Use <b>Health &amp; Speed</b> to measure what each one actually does on your hardware.</div>
  ${helpGroup(['heartbeat','tools','conv','context','fallback','thinking','budget','copy','current'])}`;
  $('#setall').onclick=()=>openUseForAll(null);
  wireHeartbeat();
+ wireFallbacks();
  wireAgentMgmt();
  qa('.chip').forEach(c=>c.onclick=e=>{e.preventDefault();const i=c.querySelector('input');i.checked=!i.checked;c.classList.toggle('on',i.checked)});
  qa('[data-copy]').forEach(b=>b.onclick=()=>{$('#cp_'+kid(b.dataset.agent)).classList.toggle('show')});
