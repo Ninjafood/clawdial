@@ -23,5 +23,6 @@
     "env_file": "",
     "log_file": "~/Library/Logs/openclaw/voice-bridge.log",
     "url": "http://127.0.0.1:8795"
-  }
+  },
+  "trusted_proxies": []
 }
