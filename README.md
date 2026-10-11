@@ -34,7 +34,7 @@ So this panel does three things I'd been doing badly by hand:
 
 **Universal fallback** — pick one or two fallback models once and the panel writes the same chain to the default and to every agent that has its own model, with a note on whether the fallback lives on a different server (a real safety net) or the same one (only covers timeouts, and may force a model swap).
 
-**Heartbeat** — see and change OpenClaw's periodic check-in: which agent owns it, how often, which model (inherit or pick one, with a warning if that forces a model swap on your server), active hours, light context.
+**Heartbeat** — see and change OpenClaw's periodic check-in, plus per-agent heartbeats (own cadence, hours, model, prompt and who gets texted) for agents that serve someone else: which agent owns it, how often, which model (inherit or pick one, with a warning if that forces a model swap on your server), active hours, light context.
 
 **Set all agents to one model** — a button on the Agents and Models pages opens a modal: pick a model, tick the agents, optionally make it the default and clear fallbacks, apply. One config write, no restart.
 

@@ -230,7 +230,8 @@ def agents_view(cfg):
             "fallbacks": fallbacks, "note": e.get("description", ""),
             "thinking": e.get("thinkingDefault") or "", "promptBudget": e.get("bootstrapTotalMaxChars"),
             "toolProfile": ((e.get("tools") or {}).get("profile")) or "", "workspace": e.get("workspace", ""),
-            "theme": ident.get("theme", ""),
+            "theme": ident.get("theme", ""), "heartbeat": e.get("heartbeat") or None,
+            "hasHeartbeatFile": os.path.exists(os.path.join(os.path.expanduser(e.get("workspace") or ""), "HEARTBEAT.md")) if e.get("workspace") else False,
         })
     hb = defaults.get("heartbeat") or {}
     return {"default": {"model": d_primary, "fallbacks": d_fallbacks,
@@ -513,8 +514,14 @@ def set_universal_fallbacks(fallbacks, apply_to_agents=True):
 
 
 def set_heartbeat(b):
-    """Update agents.defaults.heartbeat: empty strings clear a field (OpenClaw's patch treats null as delete)."""
+    """Update agents.defaults.heartbeat, or agents.entries.<agent>.heartbeat when b["agent"] is set.
+    Empty strings clear a field (OpenClaw's patch treats null as delete); b["remove"] drops an agent's override."""
     cfg = oc_config()
+    agent = str(b.get("agent") or "").strip()
+    if agent and agent not in cfg.get("agents", {}).get("entries", {}):
+        return False, "unknown agent " + agent
+    if agent and b.get("remove"):
+        return apply_patch({"agents": {"entries": {agent: {"heartbeat": None}}}}, "Heartbeat: removed %s's own heartbeat" % agent)
     hb = {}
     refs = {m["ref"] for m in model_catalog(cfg)}
     model = str(b.get("model") or "").strip()
@@ -536,6 +543,17 @@ def set_heartbeat(b):
     hb["activeHours"] = {"start": start, "end": end, **({"timezone": ah["timezone"]} if ah.get("timezone") else {})} if start else None
     hb["lightContext"] = True if b.get("lightContext") else None
     hb["isolatedSession"] = True if b.get("isolatedSession") else None
+    if agent:
+        hb.pop("agentId", None)
+        target = str(b.get("target") or "").strip()
+        to = str(b.get("to") or "").strip()
+        if to and not target:
+            return False, "pick a channel for the recipient"
+        hb["target"] = target or None
+        hb["to"] = to or None
+        hb["prompt"] = (str(b.get("prompt") or "").strip() or None)
+        why = "Heartbeat for %s: %s%s%s" % (agent, ("every " + every) if every else "default cadence", (" on " + model) if model else "", (" → %s %s" % (target, to)) if target else "")
+        return apply_patch({"agents": {"entries": {agent: {"heartbeat": hb}}}}, why)
     why = "Heartbeat: %s%s%s" % (("every " + every) if every else "default cadence", (" on " + model) if model else " on the owner's model", (" owner " + owner) if owner else "")
     return apply_patch({"agents": {"defaults": {"heartbeat": hb}}}, why)
 
