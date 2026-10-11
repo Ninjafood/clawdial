@@ -109,6 +109,12 @@ Elsewhere, run it under systemd, a tmux session, whatever you like — it's one 
 
 ## Security — read this bit
 
+`scripts/check-secrets.sh` scans the tree for keys, phone numbers, private IPs, tunnel hostnames and the like; add your own strings to `.secret-patterns` (one regex per line) and wire it up as a pre-commit hook so a leak never reaches a commit:
+
+```
+printf '#!/bin/sh\nexec bash "$(git rev-parse --show-toplevel)/scripts/check-secrets.sh"\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+```
+
 This panel can change which model your agents use, create and delete agents, and shell out to the `openclaw` CLI. Treat it like the OpenClaw dashboard itself.
 
 - It listens on `0.0.0.0` so you can reach it from your phone, but it **only answers addresses in `allowed_cidrs`** — private LANs and Tailscale by default. Anything else gets a 403 before it even sees the login page.
