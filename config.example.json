@@ -17,5 +17,11 @@
   "watch_logins": [],
   "pause_extra_launchd": [],
   "pause_cmd": "",
-  "resume_cmd": ""
+  "resume_cmd": "",
+  "voice_bridge": {
+    "launchd_label": "ai.openclaw.voice-bridge",
+    "env_file": "",
+    "log_file": "~/Library/Logs/openclaw/voice-bridge.log",
+    "url": "http://127.0.0.1:8795"
+  }
 }

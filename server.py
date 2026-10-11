@@ -47,6 +47,12 @@ DEFAULTS = {
     "pause_extra_launchd": [],                             # macOS launchd labels stopped/started together with the gateway on Pause (e.g. a voice bridge)
     "pause_cmd": "",                                       # optional shell command for Pause instead of `openclaw gateway stop`
     "resume_cmd": "",                                      # optional shell command for Resume instead of `openclaw gateway start`
+    "voice_bridge": {                                      # the Voice tab (hidden unless the LaunchAgent/plist or url responds)
+        "launchd_label": "ai.openclaw.voice-bridge",       # macOS LaunchAgent that runs the bridge
+        "env_file": "",                                    # where VOICE_* settings live (default: <openclaw_home>/.env)
+        "log_file": "~/Library/Logs/openclaw/voice-bridge.log",
+        "url": "http://127.0.0.1:8795",                    # the bridge's local address
+    },
 }
 
 
@@ -231,6 +237,241 @@ def agents_view(cfg):
                                       "activeHours": hb.get("activeHours") or {}, "lightContext": bool(hb.get("lightContext")),
                                       "isolatedSession": bool(hb.get("isolatedSession")), "target": hb.get("target") or "", "to": hb.get("to") or ""}},
             "agents": rows}
+
+
+# ---------------------------------------------------------------- voice bridge
+
+VOICE_KEYS = {  # key: (kind, allowed/validator, label)
+    "VOICE_MODE": ("choice", ("direct", "agent")), "VOICE_AGENT": ("agent", None), "VOICE_SESSION": ("text", None),
+    "VOICE_REPLY": ("choice", ("reply", "both")), "VOICE_LANG": ("text", None), "VOICE_TTS": ("choice", ("on", "off")),
+    "VOICE_TTS_VOICE": ("text", None), "VOICE_TTS_RATE": ("int", (8000, 48000)), "VOICE_KEEP_WARM": ("choice", ("on", "off")),
+    "VOICE_STT_MODEL": ("text", None), "VOICE_PUBLIC_BASE": ("text", None), "VOICE_MAX_TOKENS": ("int", (16, 4096)),
+    "VOICE_LLM_MODEL": ("text", None), "VOICE_EMBED_MAX_CHARS": ("int", (200, 8000)),
+}
+VOICE_DEFAULTS = {"VOICE_MODE": "direct", "VOICE_AGENT": "rook", "VOICE_SESSION": "voice", "VOICE_REPLY": "reply", "VOICE_LANG": "en",
+                  "VOICE_TTS": "on", "VOICE_TTS_VOICE": "", "VOICE_TTS_RATE": "16000", "VOICE_KEEP_WARM": "on", "VOICE_STT_MODEL": "qwen3-asr-1.7b",
+                  "VOICE_PUBLIC_BASE": "", "VOICE_MAX_TOKENS": "120", "VOICE_LLM_MODEL": "current", "VOICE_EMBED_MAX_CHARS": "1400"}
+_VOICES_CACHE = {}
+
+
+def voice_cfg():
+    v = dict(DEFAULTS["voice_bridge"])
+    v.update(CFG.get("voice_bridge") or {})
+    v["env_file"] = os.path.expanduser(v.get("env_file") or OC_ENV)
+    v["log_file"] = os.path.expanduser(v.get("log_file") or "")
+    v["plist"] = os.path.expanduser("~/Library/LaunchAgents/%s.plist" % v["launchd_label"]) if v.get("launchd_label") else ""
+    return v
+
+
+def voice_available():
+    v = voice_cfg()
+    return bool(v["plist"] and os.path.exists(v["plist"])) or port_open("127.0.0.1", int((v["url"].rsplit(":", 1)[-1] or "0").rstrip("/") or 0))
+
+
+def _env_lines(path):
+    try:
+        with open(path) as f:
+            return f.read().splitlines()
+    except OSError:
+        return []
+
+
+def voice_env():
+    out = dict(VOICE_DEFAULTS)
+    for line in _env_lines(voice_cfg()["env_file"]):
+        if line.strip() and not line.startswith("#") and "=" in line:
+            k, val = line.split("=", 1)
+            if k.strip().startswith("VOICE_"):
+                out[k.strip()] = val.strip().strip('"').strip("'")
+    return out
+
+
+def tts_voices():
+    if "list" in _VOICES_CACHE:
+        return _VOICES_CACHE["list"]
+    voices = []
+    if sys.platform == "darwin":
+        try:
+            r = subprocess.run(["say", "-v", "?"], capture_output=True, text=True, timeout=20)
+            for line in r.stdout.splitlines():
+                m = re.match(r"^(.*?)\s{2,}([a-z]{2}_[A-Z]{2})\s", line)
+                if m and m.group(2).startswith("en"):
+                    voices.append({"name": m.group(1).strip(), "lang": m.group(2)})
+        except Exception:  # noqa: BLE001
+            pass
+    _VOICES_CACHE["list"] = voices
+    return voices
+
+
+def studio_base_and_key():
+    cfg = oc_config()
+    name = lp(cfg)
+    prov = (cfg.get("models", {}).get("providers", {}).get(name) or {}) if name else {}
+    base = re.sub(r"/v1/?$", "", (prov.get("baseUrl") or "").rstrip("/"))
+    _, key = provider_info(cfg, name) if name else (None, "")
+    return base, key
+
+
+def studio_get(path, key, timeout=6):
+    req = urllib.request.Request(path)
+    if key:
+        req.add_header("Authorization", "Bearer " + key)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode())
+
+
+def studio_post(path, key, body, timeout=120):
+    req = urllib.request.Request(path, data=json.dumps(body).encode(), method="POST")
+    req.add_header("Content-Type", "application/json")
+    if key:
+        req.add_header("Authorization", "Bearer " + key)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, r.read().decode()[:400]
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode()[:400]
+
+
+def asr_status():
+    base, key = studio_base_and_key()
+    if not base:
+        return {"ok": False, "error": "no local server configured"}
+    try:
+        d = studio_get(base + "/api/inference/audio/stt/status", key)
+    except Exception as e:  # noqa: BLE001
+        return {"ok": False, "error": str(e)[:120]}
+    runtimes = []
+    for rt in ("mtmd", "audiocpp", "gguf", "transformers"):
+        x = d.get(rt) if rt != "transformers" else d.get("transformers") or {k: d.get(k) for k in ("loaded_model", "loading", "downloaded_models", "keep_alive_seconds")}
+        if not isinstance(x, dict):
+            continue
+        runtimes.append({"runtime": rt, "loaded": x.get("loaded_model"), "loading": bool(x.get("loading")),
+                         "downloaded": x.get("downloaded_models") or [], "keepAlive": x.get("keep_alive_seconds")})
+    return {"ok": True, "runtimes": runtimes}
+
+
+def voice_status():
+    v = voice_cfg()
+    env = voice_env()
+    label = v.get("launchd_label", "")
+    running = False
+    if sys.platform == "darwin" and label:
+        running = label in subprocess.run(["launchctl", "list"], capture_output=True, text=True, timeout=30).stdout
+    port = int((v["url"].rsplit(":", 1)[-1]).rstrip("/") or 0)
+    up = port_open("127.0.0.1", port) if port else False
+    secrets = env_secrets()
+    key = secrets.get("VOICE_BRIDGE_KEY", "")
+    bridge = None
+    if up and key:
+        try:
+            bridge = studio_get("%s/k/%s/v1/status" % (v["url"].rstrip("/"), key), None, timeout=4)
+        except Exception as e:  # noqa: BLE001
+            bridge = {"error": str(e)[:100]}
+    log = _env_lines(v["log_file"])[-25:] if v.get("log_file") else []
+    st = load_state()
+    cfg = oc_config()
+    return {"available": voice_available(), "running": running, "portOpen": up, "label": label, "url": v["url"],
+            "disabled": label in (st.get("disabledServices") or []), "env": env, "envFile": v["env_file"],
+            "keyTail": key[-4:] if key else "", "key": key, "publicBase": env.get("VOICE_PUBLIC_BASE", ""),
+            "bridge": bridge, "log": log, "voices": tts_voices(), "agents": sorted(cfg.get("agents", {}).get("entries", {}).keys()),
+            "asr": asr_status(), "stateFile": STATE_FILE}
+
+
+def voice_control(action):
+    v = voice_cfg()
+    label = v.get("launchd_label", "")
+    if sys.platform != "darwin" or not label:
+        return False, "the bridge can only be controlled through a macOS LaunchAgent on this build"
+    with LOCK:
+        st = load_state()
+        dis = set(st.get("disabledServices") or [])
+        if action == "stop":
+            dis.add(label)
+        elif action in ("start", "restart"):
+            dis.discard(label)
+        st["disabledServices"] = sorted(dis)
+        write_json(STATE_FILE, st)
+    if action == "restart":
+        r = subprocess.run(["launchctl", "kickstart", "-k", "gui/%d/%s" % (os.getuid(), label)], capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:  # not loaded yet — load it instead
+            ok, out = _launchd(label, "start")
+        else:
+            ok, out = True, ""
+    else:
+        ok, out = _launchd(label, action)
+    log_event(("🎙️ Voice bridge %s" % {"start": "started", "stop": "stopped — voice is off", "restart": "restarted"}[action]) if ok else ("❌ Voice bridge %s failed: %s" % (action, out[-120:])))
+    return ok, out[-200:] if not ok else action + " ok"
+
+
+def voice_set_settings(updates):
+    v = voice_cfg()
+    cfg = oc_config()
+    clean = {}
+    for k, val in (updates or {}).items():
+        if k not in VOICE_KEYS:
+            continue
+        kind, rule = VOICE_KEYS[k]
+        val = str(val if val is not None else "").strip()
+        if val == "":
+            clean[k] = ""
+            continue
+        if kind == "choice" and val not in rule:
+            return False, "%s must be one of %s" % (k, ", ".join(rule))
+        if kind == "int":
+            if not val.isdigit() or not (rule[0] <= int(val) <= rule[1]):
+                return False, "%s must be a whole number between %d and %d" % (k, rule[0], rule[1])
+        if kind == "agent" and val not in cfg.get("agents", {}).get("entries", {}):
+            return False, "unknown agent " + val
+        clean[k] = val
+    if not clean:
+        return False, "nothing to change"
+    lines = _env_lines(v["env_file"])
+    seen = set()
+    out = []
+    for line in lines:
+        k = line.split("=", 1)[0].strip() if "=" in line and not line.startswith("#") else None
+        if k in clean:
+            seen.add(k)
+            if clean[k] != "":
+                out.append("%s=%s" % (k, clean[k]))
+            continue
+        out.append(line)
+    for k, val in clean.items():
+        if k not in seen and val != "":
+            out.append("%s=%s" % (k, val))
+    fd = os.open(v["env_file"], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write("\n".join(out).rstrip("\n") + "\n")
+    try:
+        os.chmod(v["env_file"], 0o600)
+    except OSError:
+        pass
+    changed = ", ".join("%s=%s" % (k, val or "(default)") for k, val in clean.items())
+    log_event("🎙️ Voice settings: " + changed[:200])
+    st = voice_status()
+    if st["running"]:
+        voice_control("restart")
+    return True, "saved" + (" and bridge restarted" if st["running"] else "")
+
+
+def voice_asr(action, model="", engine=""):
+    base, key = studio_base_and_key()
+    if not base:
+        return False, "no local server configured"
+    if action == "unload":
+        code, body = studio_post(base + "/api/inference/audio/stt/unload", key, {})
+        ok = code == 200
+        log_event("🎙️ Speech recognition model unloaded on the server" if ok else "❌ Could not unload speech model: " + body[:120])
+        return ok, ("unloaded" if ok else body[:200])
+    if action == "load":
+        if not model:
+            return False, "pick a model"
+        body = {"model": model, "engine": engine or ("mtmd" if model.startswith("qwen3-asr") else "audiocpp")}
+        code, resp = studio_post(base + "/api/inference/audio/stt/load", key, body, timeout=600)
+        ok = code == 200
+        log_event(("🎙️ Speech recognition model loaded: %s" % model) if ok else ("❌ Could not load %s: %s" % (model, resp[:120])))
+        return ok, ("loaded " + model if ok else resp[:200])
+    return False, "unknown action"
 
 
 def set_universal_fallbacks(fallbacks, apply_to_agents=True):
@@ -991,7 +1232,11 @@ def openclaw_resume():
         return False, out[-300:]
     notes = []
     if sys.platform == "darwin":
+        disabled = set(load_state().get("disabledServices") or [])
         for label in CFG.get("pause_extra_launchd") or []:
+            if label in disabled:
+                notes.append("left %s off (switched off in the panel)" % label)
+                continue
             ok2, out2 = _launchd(label, "start")
             notes.append(("started %s" if ok2 else "couldn't start %s: " + out2[-80:]) % label)
     up = False
@@ -1389,6 +1634,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._session():
             return self._send(401, {"error": "login required"})
         cfg = oc_config()
+        if path == "/api/voice":
+            return self._send(200, voice_status())
         if path == "/api/state":
             st = load_state()
             us = cached("unsloth")
@@ -1450,6 +1697,15 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/agent":
             ok, msg = set_agent_model(b.get("agent", ""), b.get("model") or "", [f for f in b.get("fallbacks", []) if f], b.get("note"),
                                       b.get("thinking"), b.get("promptBudget"))
+            return self._send(200 if ok else 400, {"ok": ok, "msg": msg})
+        if path == "/api/voice/control":
+            ok, msg = voice_control(str(b.get("action", "")))
+            return self._send(200 if ok else 400, {"ok": ok, "msg": msg})
+        if path == "/api/voice/settings":
+            ok, msg = voice_set_settings(b.get("settings") or {})
+            return self._send(200 if ok else 400, {"ok": ok, "msg": msg})
+        if path == "/api/voice/asr":
+            ok, msg = voice_asr(str(b.get("action", "")), str(b.get("model", "")), str(b.get("engine", "")))
             return self._send(200 if ok else 400, {"ok": ok, "msg": msg})
         if path == "/api/fallbacks":
             ok, msg = set_universal_fallbacks(b.get("fallbacks") or [], bool(b.get("applyToAgents", True)))

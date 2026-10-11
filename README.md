@@ -40,6 +40,8 @@ So this panel does three things I'd been doing badly by hand:
 
 **Pause / Resume** — one button on the Overview stops the gateway (and anything you list in `pause_extra_launchd`, like a voice bridge) so nothing talks to your model server while you load, swap or benchmark models. Schedules and context auto-sync hold too. Resume brings every agent back where it left off.
 
+**Voice** — only shows up if you run a voice bridge (a handheld device sends speech, the bridge transcribes it on your model server, asks an agent, speaks the answer back). Turn the bridge on or off (off survives Pause/Resume), restart it, edit its settings with explanations (fast vs full mode, agent, language, voice, keep-warm, speech model, public URL), and load or unload the speech-recognition model on the server. Point `voice_bridge` in config.json at your bridge's LaunchAgent label, env file, log and URL.
+
 **Change Log** — every change the panel made, including the automatic ones, so you can see what happened while you weren't looking.
 
 Every page has a "What do these mean?" section at the bottom explaining context, fallbacks, thinking levels, quants and so on in plain words.
@@ -103,7 +105,7 @@ Elsewhere, run it under systemd, a tmux session, whatever you like — it's one 
 }
 ```
 
-`pause_extra_launchd` lists extra macOS LaunchAgent labels to stop and start along with the gateway on Pause. On Linux set `pause_cmd` / `resume_cmd` instead (`systemctl --user stop openclaw`, `... start openclaw`); when empty the panel uses `openclaw gateway stop` / `start`. `backend_hint` overrides auto-detection if it guesses wrong. `watch_logins` lists macOS accounts that must stay logged in (a dedicated iMessage user, say) — the panel shows a red row when one isn't. `gateway_restart_cmd` is what the Restart button runs if you don't use the macOS LaunchAgent (e.g. `systemctl --user restart openclaw`). Environment variables `MODEL_UI_PORT`, `OPENCLAW_BIN`, `OPENCLAW_HOME`, `MODEL_UI_DATA` (where `auth.json`/`state.json` live) do the same job.
+`voice_bridge` describes a voice bridge for the Voice tab: its LaunchAgent label, the env file holding its `VOICE_*` settings (default: the OpenClaw `.env`), its log file and local URL. `pause_extra_launchd` lists extra macOS LaunchAgent labels to stop and start along with the gateway on Pause. On Linux set `pause_cmd` / `resume_cmd` instead (`systemctl --user stop openclaw`, `... start openclaw`); when empty the panel uses `openclaw gateway stop` / `start`. `backend_hint` overrides auto-detection if it guesses wrong. `watch_logins` lists macOS accounts that must stay logged in (a dedicated iMessage user, say) — the panel shows a red row when one isn't. `gateway_restart_cmd` is what the Restart button runs if you don't use the macOS LaunchAgent (e.g. `systemctl --user restart openclaw`). Environment variables `MODEL_UI_PORT`, `OPENCLAW_BIN`, `OPENCLAW_HOME`, `MODEL_UI_DATA` (where `auth.json`/`state.json` live) do the same job.
 
 ## Security — read this bit
 
