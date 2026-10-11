@@ -40,6 +40,7 @@ DEFAULTS = {
         "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",   # private LANs
         "100.64.0.0/10", "fd7a:115c:a1e0::/48",            # Tailscale
     ],
+    "trusted_proxies": [],                                 # peers allowed to forward for others (e.g. ["127.0.0.1", "::1"] for Tailscale Serve / cloudflared on this box)
     "backend_hint": {},                                    # provider id -> unsloth|lmstudio|ollama|generic (optional)
     "gateway_restart_cmd": "",                             # optional shell command to restart the gateway (e.g. systemctl --user restart openclaw)
     "gateway_launchd_label": "ai.openclaw.gateway",       # macOS fallback when the openclaw CLI refuses
@@ -82,6 +83,7 @@ SESSION_TTL = 7 * 24 * 3600
 ENV_PATH = os.environ.get("PATH", "") + ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 OPENCLAW = CFG["openclaw_bin"] if os.path.isabs(CFG["openclaw_bin"]) else (shutil.which(CFG["openclaw_bin"], path=ENV_PATH) or CFG["openclaw_bin"])
 ALLOWED_NETS = [ipaddress.ip_network(n) for n in CFG["allowed_cidrs"]]
+TRUSTED_PROXIES = set(CFG.get("trusted_proxies") or [])
 PROXY_HEADERS = ("x-forwarded-for", "cf-connecting-ip", "x-real-ip", "forwarded", "cf-ray")
 
 LOCK = threading.Lock()
@@ -1597,11 +1599,26 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _peer(self):
+        return self.client_address[0].split("%")[0]
+
+    def _via_proxy(self):
+        return self._peer() in TRUSTED_PROXIES and bool(self.headers.get("X-Forwarded-For"))
+
+    def _client_ip(self):
+        """The real client: the TCP peer, or the forwarded address when a trusted local proxy (Tailscale Serve, cloudflared) sent it."""
+        if self._via_proxy():
+            return self.headers["X-Forwarded-For"].split(",")[0].strip()
+        return self._peer()
+
+    def _https(self):
+        return self._via_proxy() and self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+
     def _gate(self):
-        if not ip_allowed(self.client_address[0]):
+        if not ip_allowed(self._client_ip()):
             self._send(403, {"error": "LAN/Tailscale only"})
             return False
-        if any(h in self.headers for h in PROXY_HEADERS):
+        if not self._via_proxy() and any(h in self.headers for h in PROXY_HEADERS):
             self._send(403, {"error": "proxied requests are not allowed"})
             return False
         return True
@@ -1682,7 +1699,7 @@ class Handler(BaseHTTPRequestHandler):
             if check_pw(str(b.get("password", ""))):
                 tok = secrets.token_urlsafe(32)
                 save_session(tok, now + SESSION_TTL)
-                return self._send(200, {"ok": True}, extra={"Set-Cookie": "mc_session=%s; HttpOnly; SameSite=Strict; Path=/; Max-Age=%d" % (tok, SESSION_TTL)})
+                return self._send(200, {"ok": True}, extra={"Set-Cookie": "mc_session=%s; HttpOnly; SameSite=Strict; Path=/; Max-Age=%d%s" % (tok, SESSION_TTL, "; Secure" if self._https() else "")})
             with LOCK:
                 FAILED_LOGINS.setdefault(ip, []).append(now)
             time.sleep(1)

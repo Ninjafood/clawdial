@@ -107,6 +107,27 @@ Elsewhere, run it under systemd, a tmux session, whatever you like — it's one 
 
 `voice_bridge` describes a voice bridge for the Voice tab: its LaunchAgent label, the env file holding its `VOICE_*` settings (default: the OpenClaw `.env`), its log file and local URL. `pause_extra_launchd` lists extra macOS LaunchAgent labels to stop and start along with the gateway on Pause. On Linux set `pause_cmd` / `resume_cmd` instead (`systemctl --user stop openclaw`, `... start openclaw`); when empty the panel uses `openclaw gateway stop` / `start`. `backend_hint` overrides auto-detection if it guesses wrong. `watch_logins` lists macOS accounts that must stay logged in (a dedicated iMessage user, say) — the panel shows a red row when one isn't. `gateway_restart_cmd` is what the Restart button runs if you don't use the macOS LaunchAgent (e.g. `systemctl --user restart openclaw`). Environment variables `MODEL_UI_PORT`, `OPENCLAW_BIN`, `OPENCLAW_HOME`, `MODEL_UI_DATA` (where `auth.json`/`state.json` live) do the same job.
 
+## Real HTTPS (optional)
+
+The panel itself speaks plain HTTP on your LAN/tailnet. For a padlock and a proper certificate, put one of these in front of it — no cert files to manage either way:
+
+**Tailscale Serve** (private, tailnet only, Let's Encrypt cert for your machine's MagicDNS name):
+
+```
+tailscale serve --bg --https=8443 http://127.0.0.1:8790
+# then open https://<your-machine>.<tailnet>.ts.net:8443
+```
+
+**Cloudflare Tunnel + Access** (reachable from anywhere, cert from Cloudflare, your Access login in front): add a public hostname in the tunnel that points at `http://127.0.0.1:8790`.
+
+In both cases the proxy runs on the same machine and connects from localhost, so tell the panel to trust it:
+
+```json
+"trusted_proxies": ["127.0.0.1", "::1"]
+```
+
+With that set, the panel takes the real client address from the proxy's `X-Forwarded-For` header, checks it against `allowed_cidrs` as usual, and marks the login cookie `Secure` when the proxy says the connection was HTTPS. Requests carrying forwarded headers from anyone *not* in `trusted_proxies` are still refused outright.
+
 ## Security — read this bit
 
 `scripts/check-secrets.sh` scans the tree for keys, phone numbers, private IPs, tunnel hostnames and the like; add your own strings to `.secret-patterns` (one regex per line) and wire it up as a pre-commit hook so a leak never reaches a commit:
