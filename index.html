@@ -122,10 +122,11 @@ const shortName=ref=>{const i=ref.indexOf('/');const p=ref.slice(0,i),id=ref.sli
 const fmt=n=>n==null||n===''?'—':Number(n).toLocaleString();
 const S={tab:'overview',d:null,busy:false};
 try{S.tab=localStorage.getItem('mc_tab')||'overview'}catch(e){}
+if(location.hash==='#logins')S.tab='logins';
 
 const TABS=[
  ['overview','Overview','🏠','#5856d6'],['agents','Agents','🤖','#ff9500'],['models','Models & Context','🧠','#af52de'],
- ['gpu','Servers','🖥️','#34c759'],['sched','Schedules','🗓️','#ff2d55'],['health','Health & Speed','❤️','#ff3b30'],['voice','Voice','🎙️','#007aff'],['log','Change Log','📜','#8e8e93']];
+ ['gpu','Servers','🖥️','#34c759'],['sched','Schedules','🗓️','#ff2d55'],['health','Health & Speed','❤️','#ff3b30'],['voice','Voice','🎙️','#007aff'],['logins','Logins','🔐','#5ac8fa'],['log','Change Log','📜','#8e8e93']];
 
 const HELP={voice_mode:['Fast vs full','<b>Fast</b> (direct) sends your words straight to the model server with a short spoken-reply persona: answers in a few seconds, no tools, no memory. <b>Full</b> (agent) runs a real OpenClaw agent turn — calendar, messages, memory — but takes as long as that agent takes. The device can pick per request by using a /fast or /full base URL; this setting is the default when it doesn\'t.'],
  voice_keepwarm:['Keep-warm','The server unloads the speech-recognition model after a few idle minutes, so the first words after a break would wait for a reload. Keep-warm sends a tenth of a second of silence every four minutes to keep it loaded. Costs nothing noticeable; turn it off if you want the server fully idle.'],
@@ -186,7 +187,33 @@ function render(){if(!S.d)return;const h=S.d.health||{};const tab=TABS.find(t=>t
  <main><div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><h1 style="margin:0;flex:1">${tab[1]}</h1><button class="btn" id="rf">Refresh</button><button class="btn" id="lo">Sign Out</button></div>${S.d.paused?`<div class="pausebar">⏸ <b>OpenClaw is paused</b><div class="sub">The gateway is stopped, so no agent will touch your model server while you test it. Texts and voice wait until you resume, and anything published through a tunnel to the gateway (the dashboard, a voice bridge) answers 502 until then. Schedules and context auto-sync are on hold.</div><button class="btn primary" data-ocresume>Resume</button></div>`:''}<div id="page"></div></main></div>`;
  qa('.nav button').forEach(b=>b.onclick=()=>{S.tab=b.dataset.t;try{localStorage.setItem('mc_tab',S.tab)}catch(e){};render()});
  $('#rf').onclick=async()=>{toast('Refreshing…');await api('/api/health?fresh=1');await refresh()};$('#lo').onclick=async()=>{await api('/api/logout',{});renderLogin()};
- ({overview:rOverview,agents:rAgents,models:rModels,gpu:rGpu,sched:rSched,health:rHealth,voice:rVoice,log:rLog})[S.tab]()}
+ ({overview:rOverview,agents:rAgents,models:rModels,gpu:rGpu,sched:rSched,health:rHealth,voice:rVoice,logins:rLogins,log:rLog})[S.tab]()}
+
+/* ---------------- Logins */
+async function rLogins(){$('#page').innerHTML='<p class="lead">Loading logins…</p>';const d=await api('/api/logins');
+ if(!d.available){$('#page').innerHTML=`<p class="lead">The logins helper isn't installed on this machine.</p><div class="group"><div class="row"><div class="rl"><b>What this tab is for</b><div class="sub">Keeping a small set of logins that agents may use, in a dedicated macOS keychain, with a per-login policy and an approval step. Set <span class="mono">logins_helper</span> in config.json to the helper's path.</div></div></div></div>`;return}
+ const pol={auto:'Auto — hand out immediately',approve:'Approve — ask me first',deny:'Deny — never'};const fmtAge=s=>s<90?s+'s':Math.round(s/60)+' min';
+ $('#page').innerHTML=`<p class="lead">Logins your agents may use. Passwords live in a separate macOS keychain, never your personal one, and never in OpenClaw's files. "Approve" logins text you first; you decide here.</p>
+ ${d.error?`<div class="pausebar">⚠️ <div class="sub">${esc(d.error)}</div></div>`:''}
+ <div class="gh">Waiting for you ${d.pending.length?`<span class="tag warn">${d.pending.length}</span>`:''}</div><div class="group">${d.pending.length?d.pending.map(p=>`<div class="row"><div class="rl"><b>${esc((p.agent||'?').replace(/^./,c=>c.toUpperCase()))} wants “${esc(p.name)}”</b><div class="sub">Reason: ${esc(p.reason)} · ${fmtAge(p.age)} ago · request ${esc(p.id)}</div></div><div class="rc"><button class="btn primary" data-lap="${esc(p.id)}">Allow once</button><button class="btn" data-lap="${esc(p.id)}" data-h="24">Allow 24 h</button><button class="btn danger" data-lde="${esc(p.id)}">Deny</button></div></div>`).join(''):'<div class="row muted">Nothing waiting.</div>'}</div>
+ ${d.grants.length?`<div class="gh">Active approvals</div><div class="group">${d.grants.map(g=>`<div class="row"><div class="rl"><b>${esc(g.name)}</b><div class="sub">${g.uses==null?'any number of uses':g.uses+' use left'} · ${esc(g.agent||'')} · expires in ${fmtAge(g.left)}</div></div></div>`).join('')}</div>`:''}
+ <div class="gh">Saved logins <span class="sp"></span><button class="btn" id="ladd" style="font-weight:400">Add login…</button></div><div class="group">${d.logins.length?d.logins.map(l=>`<div class="row"><div class="rl"><b>${esc(l.name)}</b><div class="sub">${esc(l.username||'(no username)')}${l.url?' · '+esc(l.url):''}${l.note?' · '+esc(l.note):''}</div></div><div class="rc"><select data-lpol="${esc(l.name)}">${Object.entries(pol).map(([k,v])=>`<option value="${k}" ${l.policy===k?'selected':''}>${v}</option>`).join('')}</select><button class="btn" data-ledit="${esc(l.name)}">Edit</button><button class="btn danger" data-lrm="${esc(l.name)}">Remove</button></div></div>`).join(''):'<div class="row muted">None yet. Add the first one with “Add login…”.</div>'}</div>
+ <div class="foot">Agents ask with <span class="mono">oc-login get &lt;name&gt; --reason "…"</span>. An agent that can run shell commands could in principle reach the keychain directly, so for logins that really matter, give them only to agents without shell access.</div>
+ <div class="gh">Recent activity</div><div class="group">${(d.audit||[]).slice(0,25).map(r=>`<div class="row"><div class="rl"><b class="mono" style="font-weight:400">${esc(r.t)}</b><div class="sub">${esc(r.agent||'')} · ${esc(r.name||'')} · <b>${esc(r.outcome||'')}</b>${r.reason?' · '+esc(r.reason):''}</div></div></div>`).join('')||'<div class="row muted">No activity yet.</div>'}</div>`;
+ qa('[data-lap]').forEach(b=>b.onclick=async()=>{b.disabled=true;const j=await api('/api/logins/approve',{id:b.dataset.lap,hours:b.dataset.h||null});toast(j.ok?'Approved — the agent can try again now':'Failed: '+(j.msg||j.error));rLogins()});
+ qa('[data-lde]').forEach(b=>b.onclick=async()=>{b.disabled=true;const j=await api('/api/logins/deny',{id:b.dataset.lde});toast(j.ok?'Denied':'Failed: '+(j.msg||j.error));rLogins()});
+ qa('[data-lpol]').forEach(sel=>sel.onchange=async()=>{const j=await api('/api/logins/policy',{name:sel.dataset.lpol,policy:sel.value});toast(j.ok?'Policy updated':'Failed: '+(j.msg||j.error));rLogins()});
+ qa('[data-lrm]').forEach(b=>b.onclick=async()=>{if(prompt(`Type ${b.dataset.lrm} to remove this login from the keychain:`)!==b.dataset.lrm)return;const j=await api('/api/logins/remove',{name:b.dataset.lrm});toast(j.ok?'Removed':'Failed: '+(j.msg||j.error));rLogins()});
+ const edit=(l)=>{l=l||{};const {close}=modal(l.name?'Edit login':'Add login',`<div class="group">
+  <div class="row"><div class="rl"><b>Name</b><div class="sub">What agents ask for, e.g. github or electric-company. Lowercase, numbers, hyphens.</div></div><div class="rc"><input type="text" id="le_name" value="${esc(l.name||'')}" ${l.name?'disabled':''} style="width:180px"></div></div>
+  <div class="row"><div class="rl"><b>Username</b></div><div class="rc"><input type="text" id="le_user" value="${esc(l.username||'')}" autocomplete="off" style="width:220px"></div></div>
+  <div class="row"><div class="rl"><b>Password</b><div class="sub">${l.name?'Leave blank to keep the current one.':'Stored only in the OpenClaw keychain.'}</div></div><div class="rc"><input type="password" id="le_pw" autocomplete="new-password" style="width:220px"></div></div>
+  <div class="row"><div class="rl"><b>Website</b></div><div class="rc"><input type="text" id="le_url" value="${esc(l.url||'')}" placeholder="https://…" style="width:220px"></div></div>
+  <div class="row"><div class="rl"><b>Note</b><div class="sub">Shown to agents in the list; no secrets.</div></div><div class="rc"><input type="text" id="le_note" value="${esc(l.note||'')}" style="width:220px"></div></div>
+  <div class="row"><div class="rl"><b>Policy</b></div><div class="rc"><select id="le_pol">${Object.entries(pol).map(([k,v])=>`<option value="${k}" ${(l.policy||'approve')===k?'selected':''}>${v}</option>`).join('')}</select></div></div></div>`,`<button class="btn" data-close>Cancel</button><button class="btn primary" id="le_go">Save</button>`);
+  $('#le_go').onclick=async()=>{const g=$('#le_go');g.disabled=true;const j=await api('/api/logins/save',{name:$('#le_name').value.trim().toLowerCase(),username:$('#le_user').value,password:$('#le_pw').value,url:$('#le_url').value,note:$('#le_note').value,policy:$('#le_pol').value});g.disabled=false;toast(j.ok?'Saved':'Not saved: '+(j.msg||j.error));if(j.ok){close();rLogins()}}};
+ $('#ladd').onclick=()=>edit(null);qa('[data-ledit]').forEach(b=>b.onclick=()=>edit(d.logins.find(x=>x.name===b.dataset.ledit)));
+ try{if(location.hash==='#logins')history.replaceState(null,'',location.pathname)}catch(e){}}
 
 /* ---------------- Voice */
 async function rVoice(){$('#page').innerHTML='<p class="lead">Loading voice status…</p>';const v=await api('/api/voice');if(v.error){$('#page').innerHTML=`<p class="lead">${esc(v.error)}</p>`;return}
@@ -228,7 +255,7 @@ async function rVoice(){$('#page').innerHTML='<p class="lead">Loading voice stat
   const j=await api('/api/voice/settings',{settings});g.disabled=false;g.textContent='Save voice settings';toast(j.ok?'Voice settings '+j.msg:'Not saved: '+(j.msg||j.error));if(j.ok)setTimeout(rVoice,1500)}}
 
 /* ---------------- Overview */
-const KIND={unsloth:'Unsloth Studio',lmstudio:'LM Studio',ollama:'Ollama',generic:'OpenAI-compatible'};
+const KIND={unsloth:'Unsloth Studio',lmstudio:'LM Studio',ollama:'Ollama',runpod:'Runpod serverless',generic:'OpenAI-compatible'};
 function rOverview(){const d=S.d,h=d.health||{},u=h.unsloth||{};
  const desk=u.ok?`<b class="ok-t">Online</b>${u.active?' — '+esc(u.active)+' loaded':''}`:`<b class="bad-t">Offline</b> — ${u.hostUp===false?'the machine isn\'t reachable':u.portOpen===false?'machine is up, but the server isn\'t running':esc(u.error||'not reachable')}`;
  $('#page').innerHTML=`<p class="lead">What your agents are using right now, and whether the machines behind them are up. Change things in the other sections.</p>
