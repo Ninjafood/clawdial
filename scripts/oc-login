@@ -1,0 +1,345 @@
+#!/usr/bin/python3 -I
+"""oc-login — OpenClaw logins backed by a dedicated macOS keychain.
+
+Secrets live in ~/Library/Keychains/openclaw.keychain-db (never your personal keychain).
+Names, policies and approvals live next to this script; no secret is ever written there.
+
+Agents:   oc-login list
+          oc-login get <name> --reason "<why>" [--agent rook]
+Panel:    oc-login add <name> --username U [--url X] [--policy approve|auto|deny] [--note N]   (password on stdin)
+          oc-login set-policy <name> <policy> | remove <name> | pending | approve <id> [--hours H] | deny <id> | audit [--limit N]
+OpenClaw: oc-login exec-provider          (SecretRef exec protocol v1; ids map to config secrets, not agent logins)
+          oc-login add-config <id>         (value on stdin)
+
+Policies: auto = hand out immediately (logged); approve = Ryan approves in Model Control first; deny = never.
+Note: an agent that can run shell commands as this user could call macOS `security` itself, so approvals are a
+guardrail against mistakes, not a wall against a hostile agent. Agents without shell access can only use this tool.
+"""
+import fcntl, json, os, re, secrets, subprocess, sys, time
+
+HOME = os.path.expanduser("~")
+DIR = os.path.dirname(os.path.realpath(__file__))
+KC = os.path.join(HOME, "Library/Keychains/openclaw.keychain-db")
+UNLOCK = os.path.join(DIR, ".unlock")
+REG = os.path.join(DIR, "registry.json")
+PENDING = os.path.join(DIR, "pending.json")
+GRANTS = os.path.join(DIR, "grants.json")
+AUDIT = os.path.join(DIR, "audit.jsonl")
+CONF = os.path.join(DIR, "config.json")
+LOCK = os.path.join(DIR, ".lock")
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+POLICIES = ("auto", "approve", "deny")
+LOGIN_SVC = "openclaw/%s"
+CONFIG_SVC = "openclaw-config/%s"
+
+
+def out(obj, code=0):
+    print(json.dumps(obj))
+    sys.exit(code)
+
+
+def fail(msg, code=1, **extra):
+    out(dict({"status": "error", "error": msg}, **extra), code)
+
+
+def rj(path, default):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def wj(path, obj):
+    tmp = path + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump(obj, f, indent=2)
+    os.replace(tmp, path)
+
+
+def conf():
+    c = rj(CONF, {})
+    c.setdefault("pending_ttl_seconds", 900)
+    c.setdefault("once_window_seconds", 900)
+    return c
+
+
+def audit(**row):
+    row["t"] = time.strftime("%Y-%m-%d %H:%M:%S")
+    fd = os.open(AUDIT, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    with os.fdopen(fd, "a") as f:
+        f.write(json.dumps(row) + "\n")
+
+
+def sec(*args, stdin=None):
+    return subprocess.run(["/usr/bin/security", *args], capture_output=True, text=True, input=stdin, timeout=30)
+
+
+def unlock():
+    try:
+        pw = open(UNLOCK).read().strip()
+    except OSError:
+        fail("keychain unlock file missing")
+    r = sec("unlock-keychain", "-p", pw, KC)
+    if r.returncode != 0:
+        fail("could not unlock the OpenClaw keychain: " + (r.stderr.strip() or "unknown error"))
+
+
+def kc_get(service):
+    r = sec("find-generic-password", "-s", service, "-w", KC)
+    if r.returncode != 0:
+        return None
+    return r.stdout.rstrip("\n")
+
+
+def kc_attrs(service):
+    r = sec("find-generic-password", "-s", service, KC)
+    if r.returncode != 0:
+        return {}
+    a = {}
+    for key in ("acct", "icmt"):
+        m = re.search(r'"%s"<blob>="(.*)"' % key, r.stdout + r.stderr)
+        if m:
+            a[key] = m.group(1)
+    return a
+
+
+def kc_put(service, account, label, value, comment=""):
+    args = ["add-generic-password", "-U", "-s", service, "-a", account, "-l", label, "-T", "/usr/bin/security", "-w", value]
+    if comment:
+        args[1:1] = ["-j", comment]
+    r = sec(*args, KC)
+    if r.returncode != 0:
+        fail("keychain write failed: " + (r.stderr.strip() or "unknown error"))
+
+
+def kc_del(service):
+    sec("delete-generic-password", "-s", service, KC)
+
+
+def notify(text):
+    n = conf().get("notify") or {}
+    cmd, to = n.get("cmd"), n.get("to")
+    if not cmd or not to:
+        return False
+    try:
+        r = subprocess.run([os.path.expanduser(cmd), "send", "--to", to, "--text", text], capture_output=True, text=True, timeout=60)
+        return r.returncode == 0
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def check_name(name):
+    if not name or not NAME_RE.match(name):
+        fail("login names are lowercase letters, numbers and hyphens (max 64), e.g. github or bank-portal")
+
+
+def argval(argv, flag, default=None):
+    if flag in argv:
+        i = argv.index(flag)
+        if i + 1 < len(argv):
+            return argv[i + 1]
+    return default
+
+
+def cmd_list(argv):
+    reg = rj(REG, {}).get("logins", {})
+    out({"status": "ok", "logins": [{"name": k, "username": v.get("username", ""), "url": v.get("url", ""),
+                                      "policy": v.get("policy", "approve"), "note": v.get("note", "")} for k, v in sorted(reg.items())]})
+
+
+def cmd_get(argv):
+    name = argv[0] if argv else ""
+    check_name(name)
+    reason = (argval(argv, "--reason") or "").strip()
+    agent = (argval(argv, "--agent") or os.environ.get("OPENCLAW_AGENT_ID") or "unknown").strip()[:40]
+    if not reason:
+        fail("--reason is required: say briefly why you need this login")
+    reason = reason[:300]
+    c = conf()
+    with open(LOCK, "a") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        reg = rj(REG, {}).get("logins", {})
+        item = reg.get(name)
+        if not item:
+            audit(agent=agent, name=name, outcome="unknown", reason=reason)
+            fail("no saved login called '%s'. Run `oc-login list` to see what exists." % name)
+        policy = item.get("policy", "approve")
+        if policy == "deny":
+            audit(agent=agent, name=name, outcome="denied-policy", reason=reason)
+            fail("the login '%s' is not available to agents." % name, status="denied")
+        now = time.time()
+        grants = rj(GRANTS, {})
+        g = grants.get(name)
+        allowed = policy == "auto"
+        if not allowed and g and g.get("until", 0) > now and (g.get("uses") is None or g.get("uses", 0) > 0):
+            allowed = True
+            if g.get("uses") is not None:
+                g["uses"] -= 1
+                if g["uses"] <= 0:
+                    grants.pop(name, None)
+                wj(GRANTS, grants)
+        if allowed:
+            unlock()
+            pw = kc_get(LOGIN_SVC % name)
+            sec("lock-keychain", KC)
+            if pw is None:
+                audit(agent=agent, name=name, outcome="missing-secret", reason=reason)
+                fail("the login '%s' is registered but its password is missing from the keychain." % name)
+            audit(agent=agent, name=name, outcome="released", via=policy if policy == "auto" else "grant", reason=reason)
+            out({"status": "ok", "name": name, "username": item.get("username", ""), "url": item.get("url", ""), "password": pw,
+                 "note": "Use this only for the task you gave as the reason. Never repeat the password in a message."})
+        pend = rj(PENDING, {})
+        for pid, p in pend.items():
+            if p["name"] == name and p["agent"] == agent and now - p["at"] < c["pending_ttl_seconds"]:
+                audit(agent=agent, name=name, outcome="still-pending", id=pid, reason=reason)
+                out({"status": "pending", "id": pid, "message": "Still waiting for Ryan to approve '%s'. Tell him it's waiting and try again after he approves." % name})
+        pid = secrets.token_hex(3)
+        pend = {k: v for k, v in pend.items() if now - v["at"] < c["pending_ttl_seconds"]}
+        pend[pid] = {"name": name, "agent": agent, "reason": reason, "at": now}
+        wj(PENDING, pend)
+        url = c.get("approve_url", "")
+        sent = notify("🔐 %s wants the login \"%s\" (%s). Reason: %s\nApprove or deny in Model Control%s. Request %s expires in %d min."
+                      % (agent.capitalize(), name, item.get("username", ""), reason, (": " + url) if url else "", pid, c["pending_ttl_seconds"] // 60))
+        audit(agent=agent, name=name, outcome="pending", id=pid, notified=sent, reason=reason)
+        out({"status": "pending", "id": pid, "message": "Asked Ryan to approve '%s'%s. Try again after he approves." % (name, "" if sent else " (text notification failed; he can still approve in Model Control)")})
+
+
+def cmd_add(argv):
+    name = argv[0] if argv else ""
+    check_name(name)
+    policy = argval(argv, "--policy", None)
+    if policy and policy not in POLICIES:
+        fail("policy must be auto, approve or deny")
+    pw = sys.stdin.read().rstrip("\n")
+    with open(LOCK, "a") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        reg = rj(REG, {"logins": {}})
+        cur = reg["logins"].get(name, {})
+        item = {"username": argval(argv, "--username", cur.get("username", "")) or "", "url": argval(argv, "--url", cur.get("url", "")) or "",
+                "note": (argval(argv, "--note", cur.get("note", "")) or "")[:200], "policy": policy or cur.get("policy", "approve"),
+                "updated": time.strftime("%Y-%m-%d %H:%M")}
+        if pw:
+            unlock()
+            kc_put(LOGIN_SVC % name, item["username"] or name, "openclaw: " + name, pw, ("url=" + item["url"]) if item["url"] else "")
+            sec("lock-keychain", KC)
+        elif not cur:
+            fail("a new login needs a password")
+        reg["logins"][name] = item
+        wj(REG, reg)
+    audit(agent="panel", name=name, outcome="saved", password_changed=bool(pw))
+    out({"status": "ok", "name": name})
+
+
+def cmd_set_policy(argv):
+    if len(argv) < 2 or argv[1] not in POLICIES:
+        fail("usage: set-policy <name> auto|approve|deny")
+    with open(LOCK, "a") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        reg = rj(REG, {"logins": {}})
+        if argv[0] not in reg["logins"]:
+            fail("unknown login")
+        reg["logins"][argv[0]]["policy"] = argv[1]
+        wj(REG, reg)
+        if argv[1] != "approve":
+            g = rj(GRANTS, {}); g.pop(argv[0], None); wj(GRANTS, g)
+    audit(agent="panel", name=argv[0], outcome="policy-" + argv[1])
+    out({"status": "ok"})
+
+
+def cmd_remove(argv):
+    name = argv[0] if argv else ""
+    check_name(name)
+    with open(LOCK, "a") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        reg = rj(REG, {"logins": {}})
+        reg["logins"].pop(name, None)
+        wj(REG, reg)
+        g = rj(GRANTS, {}); g.pop(name, None); wj(GRANTS, g)
+        unlock(); kc_del(LOGIN_SVC % name); sec("lock-keychain", KC)
+    audit(agent="panel", name=name, outcome="removed")
+    out({"status": "ok"})
+
+
+def cmd_pending(argv):
+    c = conf(); now = time.time()
+    pend = {k: v for k, v in rj(PENDING, {}).items() if now - v["at"] < c["pending_ttl_seconds"]}
+    grants = {k: v for k, v in rj(GRANTS, {}).items() if v.get("until", 0) > now}
+    out({"status": "ok", "pending": [dict(v, id=k, age=int(now - v["at"])) for k, v in sorted(pend.items(), key=lambda kv: kv[1]["at"])],
+         "grants": [dict(v, name=k, left=int(v["until"] - now)) for k, v in grants.items()]})
+
+
+def cmd_approve(argv, approve=True):
+    pid = argv[0] if argv else ""
+    c = conf(); now = time.time()
+    with open(LOCK, "a") as lk:
+        fcntl.flock(lk, fcntl.LOCK_EX)
+        pend = rj(PENDING, {})
+        p = pend.pop(pid, None)
+        if not p or now - p["at"] >= c["pending_ttl_seconds"]:
+            wj(PENDING, pend)
+            fail("that request is gone or expired")
+        wj(PENDING, pend)
+        if approve:
+            hours = argval(argv, "--hours")
+            grants = rj(GRANTS, {})
+            if hours:
+                grants[p["name"]] = {"until": now + float(hours) * 3600, "uses": None, "agent": p["agent"], "by": "panel"}
+            else:
+                grants[p["name"]] = {"until": now + c["once_window_seconds"], "uses": 1, "agent": p["agent"], "by": "panel"}
+            wj(GRANTS, grants)
+    audit(agent="panel", name=p["name"], outcome=("approved-%sh" % argval(argv, "--hours")) if (approve and argval(argv, "--hours")) else ("approved-once" if approve else "denied"), id=pid, requester=p["agent"])
+    out({"status": "ok", "name": p["name"], "agent": p["agent"]})
+
+
+def cmd_audit(argv):
+    n = int(argval(argv, "--limit", "50"))
+    try:
+        rows = [json.loads(l) for l in open(AUDIT) if l.strip()][-n:]
+    except OSError:
+        rows = []
+    out({"status": "ok", "rows": rows[::-1]})
+
+
+def cmd_exec_provider(argv):
+    try:
+        req = json.loads(sys.stdin.read() or "{}")
+    except ValueError:
+        req = {}
+    ids = req.get("ids") or []
+    unlock()
+    vals, errs = {}, {}
+    for i in ids:
+        v = kc_get(CONFIG_SVC % i) if isinstance(i, str) and NAME_RE.match(i) else None
+        if v is None:
+            errs[i] = {"code": "NOT_FOUND", "message": "no config secret '%s' in the OpenClaw keychain" % i}
+        else:
+            vals[i] = v
+    sec("lock-keychain", KC)
+    print(json.dumps({"protocolVersion": 1, "values": vals, **({"errors": errs} if errs else {})}))
+
+
+def cmd_add_config(argv):
+    i = argv[0] if argv else ""
+    check_name(i)
+    v = sys.stdin.read().rstrip("\n")
+    if not v:
+        fail("value required on stdin")
+    unlock(); kc_put(CONFIG_SVC % i, "openclaw", "openclaw config: " + i, v); sec("lock-keychain", KC)
+    audit(agent="cli", name="config:" + i, outcome="saved")
+    out({"status": "ok", "id": i})
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help", "help"):
+        print(__doc__.strip()); return
+    cmd, argv = sys.argv[1], sys.argv[2:]
+    os.umask(0o077)
+    {"list": cmd_list, "get": cmd_get, "add": cmd_add, "set-policy": cmd_set_policy, "remove": cmd_remove,
+     "pending": cmd_pending, "approve": cmd_approve, "deny": lambda a: cmd_approve(a, approve=False),
+     "audit": cmd_audit, "exec-provider": cmd_exec_provider, "add-config": cmd_add_config}.get(cmd, lambda a: fail("unknown command " + cmd))(argv)
+
+
+if __name__ == "__main__":
+    main()

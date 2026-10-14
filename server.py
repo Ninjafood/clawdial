@@ -48,6 +48,7 @@ DEFAULTS = {
     "pause_extra_launchd": [],                             # macOS launchd labels stopped/started together with the gateway on Pause (e.g. a voice bridge)
     "pause_cmd": "",                                       # optional shell command for Pause instead of `openclaw gateway stop`
     "resume_cmd": "",                                      # optional shell command for Resume instead of `openclaw gateway start`
+    "logins_helper": "~/.openclaw/keychain/oc-login",     # Logins tab: helper that keeps agent logins in a dedicated keychain (hidden if missing)
     "voice_bridge": {                                      # the Voice tab (hidden unless the LaunchAgent/plist or url responds)
         "launchd_label": "ai.openclaw.voice-bridge",       # macOS LaunchAgent that runs the bridge
         "env_file": "",                                    # where VOICE_* settings live (default: <openclaw_home>/.env)
@@ -477,6 +478,50 @@ def voice_asr(action, model="", engine=""):
     return False, "unknown action"
 
 
+# ---------------------------------------------------------------- logins (dedicated keychain via helper)
+
+def logins_helper():
+    h = os.path.expanduser(CFG.get("logins_helper") or "")
+    return h if h and os.path.isfile(h) and os.access(h, os.X_OK) else None
+
+
+def logins_call(args, stdin=None):
+    h = logins_helper()
+    if not h:
+        return {"status": "error", "error": "logins helper not installed"}
+    try:
+        r = subprocess.run([h] + args, capture_output=True, text=True, input=stdin, timeout=90)
+        return json.loads(r.stdout.strip().splitlines()[-1]) if r.stdout.strip() else {"status": "error", "error": (r.stderr or "no output")[-200:]}
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "error": str(e)[:200]}
+
+
+def logins_state():
+    if not logins_helper():
+        return {"available": False}
+    lst = logins_call(["list"])
+    pend = logins_call(["pending"])
+    aud = logins_call(["audit", "--limit", "40"])
+    return {"available": True, "logins": lst.get("logins", []), "pending": pend.get("pending", []), "grants": pend.get("grants", []),
+            "audit": aud.get("rows", []), "error": lst.get("error") or pend.get("error")}
+
+
+LOGIN_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+
+
+def logins_save(b):
+    name = str(b.get("name", "")).strip().lower()
+    if not LOGIN_NAME_RE.match(name):
+        return False, "name: lowercase letters, numbers and hyphens, e.g. github or bank-portal"
+    args = ["add", name, "--username", str(b.get("username", ""))[:200], "--url", str(b.get("url", ""))[:300],
+            "--policy", str(b.get("policy", "approve")), "--note", str(b.get("note", ""))[:200]]
+    r = logins_call(args, stdin=str(b.get("password") or ""))
+    if r.get("status") == "ok":
+        log_event("🔐 Saved login '%s'%s" % (name, " (password updated)" if b.get("password") else ""))
+        return True, "saved"
+    return False, r.get("error", "failed")
+
+
 def set_universal_fallbacks(fallbacks, apply_to_agents=True):
     """Write one fallback chain to the default model and (optionally) to every agent that has its own model."""
     cfg = oc_config()
@@ -869,11 +914,17 @@ def provider_root(cfg, name):
     return (base[:-3] if base.endswith("/v1") else base.rstrip("/")), key
 
 
+RUNPOD_RE = re.compile(r"^https://api\.runpod\.ai/v2/([a-z0-9]+)")
+
+
 def detect_backend(cfg, name):
     """Work out what kind of server a provider is. Cached per provider for 5 minutes."""
     hint = (CFG.get("backend_hint") or {}).get(name)
     if hint:
         return hint
+    base0, _ = provider_info(cfg, name)
+    if RUNPOD_RE.match(base0 or ""):
+        return "runpod"  # never probe a serverless endpoint: every unknown route becomes a billed, failed job
     det = CACHE.setdefault("kinds", {})
     ent = det.get(name)
     if ent and time.time() - ent["at"] < 300:
@@ -940,6 +991,15 @@ def server_status(cfg, name):
                         "models": [{"id": m.get("name"), "quant": (m.get("details") or {}).get("quantization_level"),
                                     "loaded": (m.get("name") in running), "task": None, "maxContext": None} for m in tags],
                         "caps": {"load": False, "estimate": False, "downloaded": True, "loadedContext": bool((first or {}).get("context_length"))}})
+        elif kind == "runpod":
+            ep = RUNPOD_RE.match(base).group(1)
+            h = http_json("https://api.runpod.ai/v2/%s/health" % ep, key=key, timeout=6)  # free: no job, no worker wake-up
+            w = h.get("workers") or {}
+            j = h.get("jobs") or {}
+            warm = (w.get("ready") or 0) + (w.get("running") or 0)
+            out.update({"ok": True, "active": ("%d warm worker%s" % (warm, "" if warm == 1 else "s")) if warm else "scaled to zero",
+                        "models": [{"id": m.get("id"), "loaded": None, "task": None, "maxContext": m.get("contextWindow")} for m in (cfg.get("models", {}).get("providers", {}).get(name, {}).get("models") or [])],
+                        "serverless": {"workers": w, "jobs": j}})
         else:
             d = http_json(base.rstrip("/") + "/models", key=key, timeout=4)
             out.update({"ok": True, "models": [{"id": m.get("id"), "loaded": None, "task": None, "maxContext": None}
@@ -1669,6 +1729,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self._session():
             return self._send(401, {"error": "login required"})
         cfg = oc_config()
+        if path == "/api/logins":
+            return self._send(200, logins_state())
         if path == "/api/voice":
             return self._send(200, voice_status())
         if path == "/api/state":
@@ -1733,6 +1795,22 @@ class Handler(BaseHTTPRequestHandler):
             ok, msg = set_agent_model(b.get("agent", ""), b.get("model") or "", [f for f in b.get("fallbacks", []) if f], b.get("note"),
                                       b.get("thinking"), b.get("promptBudget"))
             return self._send(200 if ok else 400, {"ok": ok, "msg": msg})
+        if path == "/api/logins/save":
+            ok, msg = logins_save(b); return self._send(200 if ok else 400, {"ok": ok, "msg": msg})
+        if path in ("/api/logins/remove", "/api/logins/policy", "/api/logins/approve", "/api/logins/deny"):
+            act = path.rsplit("/", 1)[1]
+            if act == "remove":
+                r = logins_call(["remove", str(b.get("name", ""))])
+            elif act == "policy":
+                r = logins_call(["set-policy", str(b.get("name", "")), str(b.get("policy", ""))])
+            elif act == "approve":
+                r = logins_call(["approve", str(b.get("id", ""))] + (["--hours", str(float(b["hours"]))] if b.get("hours") else []))
+            else:
+                r = logins_call(["deny", str(b.get("id", ""))])
+            ok = r.get("status") == "ok"
+            if ok:
+                log_event("🔐 Login %s: %s" % (act, b.get("name") or r.get("name") or b.get("id")))
+            return self._send(200 if ok else 400, {"ok": ok, "msg": r.get("error", "done")})
         if path == "/api/voice/control":
             ok, msg = voice_control(str(b.get("action", "")))
             return self._send(200 if ok else 400, {"ok": ok, "msg": msg})

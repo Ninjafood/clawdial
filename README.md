@@ -40,6 +40,8 @@ So this panel does three things I'd been doing badly by hand:
 
 **Pause / Resume** — one button on the Overview stops the gateway (and anything you list in `pause_extra_launchd`, like a voice bridge) so nothing talks to your model server while you load, swap or benchmark models. Schedules and context auto-sync hold too. Resume brings every agent back where it left off.
 
+**Logins** (macOS) — a small set of logins your agents may use, kept in a *separate* macOS keychain (never your personal one). Each login is auto, approve or deny; "approve" requests text you and you decide in the panel, so an agent can't approve itself. Everything is audited. The helper is `scripts/oc-login`: put it at `~/.openclaw/keychain/oc-login`, create the keychain (see the comment at the top of the script), and agents call `oc-login get <name> --reason "..."`.
+
 **Voice** — only shows up if you run a voice bridge (a handheld device sends speech, the bridge transcribes it on your model server, asks an agent, speaks the answer back). Turn the bridge on or off (off survives Pause/Resume), restart it, edit its settings with explanations (fast vs full mode, agent, language, voice, keep-warm, speech model, public URL), and load or unload the speech-recognition model on the server. Point `voice_bridge` in config.json at your bridge's LaunchAgent label, env file, log and URL.
 
 **Change Log** — every change the panel made, including the automatic ones, so you can see what happened while you weren't looking.
