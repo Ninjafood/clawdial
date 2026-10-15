@@ -1406,6 +1406,17 @@ def agents_busy():
         return False
 
 
+def context_target(loaded):
+    """What OpenClaw's entry should say for a server context of `loaded` tokens, after the configured headroom."""
+    try:
+        pct = float(load_state().get("contextHeadroomPct", 0) or 0)
+    except (TypeError, ValueError):
+        pct = 0.0
+    pct = max(0.0, min(pct, 50.0))
+    t = int(loaded * (1 - pct / 100.0))
+    return max(1024, t - t % 256) if pct else loaded
+
+
 def sync_loaded_context(us):
     """Keep the loaded desktop model's OpenClaw entry in step with the context Unsloth actually loaded."""
     st = load_state()
@@ -1419,15 +1430,16 @@ def sync_loaded_context(us):
     if not name:
         return
     changed = []
+    want = context_target(loaded)
     for i, ent in enumerate(models):
-        if ent.get("id") in (active, "current") and ent.get("contextWindow") != loaded:
-            changed.append("%s %s→%s" % (ent["id"], ent.get("contextWindow"), loaded))
-            models[i] = {**ent, "contextWindow": loaded}
+        if ent.get("id") in (active, "current") and ent.get("contextWindow") != want:
+            changed.append("%s %s→%s" % (ent["id"], ent.get("contextWindow"), want))
+            models[i] = {**ent, "contextWindow": want}
     if changed:
         if agents_busy():
             return  # try again on the next poll; a config write now would drop an in-flight reply
         apply_patch({"models": {"providers": {name: {"models": models}}}},
-                    "🔄 Auto-synced context to %s (desktop loaded %s): %s" % (loaded, active, "; ".join(changed)))
+                    "🔄 Auto-synced context to %s (desktop loaded %s at %s%s): %s" % (want, active, loaded, ", minus headroom" if want != loaded else "", "; ".join(changed)))
 
 
 def sync_context_now():
@@ -1446,23 +1458,24 @@ def sync_context_now():
     refs = {av["default"]["model"]} | {a["effective"] for a in av["agents"]}
     targets = {r.split("/", 1)[1] for r in refs if r and r.startswith(name + "/")} | {"current", active}
     changed, skipped, same = [], [], []
+    want = context_target(loaded)
     for i, m in enumerate(models):
         if m.get("id") not in targets:
             continue
         if re.search(r"-\d+k$", m["id"]):
             skipped.append(m["id"])  # deliberate smaller copies stay as they are
             continue
-        if m.get("contextWindow") != loaded:
-            changed.append("%s %s→%s" % (m["id"], m.get("contextWindow"), loaded))
-            models[i] = {**m, "contextWindow": loaded}
+        if m.get("contextWindow") != want:
+            changed.append("%s %s→%s" % (m["id"], m.get("contextWindow"), want))
+            models[i] = {**m, "contextWindow": want}
         else:
             same.append(m["id"])
     if changed:
         ok, msg = apply_patch({"models": {"providers": {name: {"models": models}}}},
-                              "🔄 Synced context to %s (loaded %s): %s" % (loaded, active, "; ".join(changed)))
+                              "🔄 Synced context to %s (loaded %s at %s): %s" % (want, active, loaded, "; ".join(changed)))
         if not ok:
             return False, {"msg": msg}
-    return True, {"loaded": loaded, "active": active, "changed": changed, "unchanged": same, "skippedCopies": skipped}
+    return True, {"loaded": loaded, "target": want, "active": active, "changed": changed, "unchanged": same, "skippedCopies": skipped}
 
 
 def poller_loop():
@@ -1746,7 +1759,7 @@ class Handler(BaseHTTPRequestHandler):
                                     "desktopModels": desk, "desktopDown": not us.get("ok"), "unsloth": us,
                                     "health": cached("health"), "polledAt": CACHE["at"],
                                     "paused": st.get("paused"), "schedules": st["schedules"], "lastRun": st["lastRun"], "log": st["log"][:100],
-                                    "syncContext": st.get("syncContext", True), "sessions": SESS["data"]})
+                                    "syncContext": st.get("syncContext", True), "contextHeadroomPct": st.get("contextHeadroomPct", 0), "sessions": SESS["data"]})
         if path == "/api/sessions":
             return self._send(200, {"sessions": sessions_view("fresh" in self.path), "at": SESS["at"]})
         if path == "/api/unsloth":
@@ -1884,9 +1897,18 @@ class Handler(BaseHTTPRequestHandler):
                 st = load_state()
                 if "syncContext" in b:
                     st["syncContext"] = bool(b["syncContext"])
+                if "contextHeadroomPct" in b:
+                    try:
+                        st["contextHeadroomPct"] = max(0.0, min(float(b["contextHeadroomPct"] or 0), 50.0))
+                    except (TypeError, ValueError):
+                        return self._send(400, {"ok": False, "msg": "headroom must be a number of percent"})
                 write_json(STATE_FILE, st)
-            log_event("⚙️ Auto-sync desktop context: %s" % ("on" if st.get("syncContext", True) else "off"))
-            return self._send(200, {"ok": True, "syncContext": st.get("syncContext", True)})
+            if "contextHeadroomPct" in b:
+                log_event("⚙️ Context headroom: %s%%" % st["contextHeadroomPct"])
+                ok, info = sync_context_now()
+            else:
+                log_event("⚙️ Auto-sync desktop context: %s" % ("on" if st.get("syncContext", True) else "off"))
+            return self._send(200, {"ok": True, "syncContext": st.get("syncContext", True), "contextHeadroomPct": st.get("contextHeadroomPct", 0)})
         if path == "/api/alias":
             ok, msg = add_alias(b.get("ref", ""), b.get("contextWindow") or 0, b.get("maxTokens"))
             return self._send(200 if ok else 400, {"ok": ok, "msg": msg})
