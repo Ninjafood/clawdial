@@ -1759,7 +1759,9 @@ class Handler(BaseHTTPRequestHandler):
                                     "desktopModels": desk, "desktopDown": not us.get("ok"), "unsloth": us,
                                     "health": cached("health"), "polledAt": CACHE["at"],
                                     "paused": st.get("paused"), "schedules": st["schedules"], "lastRun": st["lastRun"], "log": st["log"][:100],
-                                    "syncContext": st.get("syncContext", True), "contextHeadroomPct": st.get("contextHeadroomPct", 0), "sessions": SESS["data"]})
+                                    "syncContext": st.get("syncContext", True), "contextHeadroomPct": st.get("contextHeadroomPct", 0),
+                                    "midTurnPrecheck": bool((((cfg.get("agents") or {}).get("defaults") or {}).get("compaction") or {}).get("midTurnPrecheck", {}).get("enabled")),
+                                    "sessions": SESS["data"]})
         if path == "/api/sessions":
             return self._send(200, {"sessions": sessions_view("fresh" in self.path), "at": SESS["at"]})
         if path == "/api/unsloth":
@@ -1903,6 +1905,13 @@ class Handler(BaseHTTPRequestHandler):
                     except (TypeError, ValueError):
                         return self._send(400, {"ok": False, "msg": "headroom must be a number of percent"})
                 write_json(STATE_FILE, st)
+            if "midTurnPrecheck" in b:
+                if agents_busy() and not b.get("force"):
+                    return self._send(409, {"ok": False, "busy": True, "msg": "an agent is mid-turn; try again in a moment"})
+                on = bool(b["midTurnPrecheck"])
+                ok, msg = apply_patch({"agents": {"defaults": {"compaction": {"midTurnPrecheck": {"enabled": on}}}}},
+                                      "⚙️ Mid-turn context check: %s" % ("on" if on else "off"))
+                return self._send(200 if ok else 500, {"ok": ok, "msg": msg, "midTurnPrecheck": on})
             if "contextHeadroomPct" in b:
                 log_event("⚙️ Context headroom: %s%%" % st["contextHeadroomPct"])
                 ok, info = sync_context_now()
