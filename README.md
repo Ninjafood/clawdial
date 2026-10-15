@@ -154,7 +154,7 @@ Every 15 seconds the panel asks the local server what's loaded and with what con
 
 Switching an agent to a model with a smaller context than its conversation triggers the same check before saving.
 
-The Servers page also has a **Headroom** setting (percent). With it on, sync writes a slightly smaller number than the server loaded, e.g. 5% → 65,792 becomes 62,464, so a token estimate that is a little off never overflows the server.
+The Servers page also has a **Headroom** setting (percent). With it on, sync writes a slightly smaller number than the server loaded, e.g. 5% → 65,792 becomes 62,464, so a token estimate that is a little off never overflows the server. Next to it, **Check size mid-turn** switches on OpenClaw's mid-turn precheck, which trims or compacts after a big tool result instead of waiting for the end of the turn.
 
 ## Things it doesn't do
 
