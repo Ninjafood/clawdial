@@ -154,6 +154,8 @@ Every 15 seconds the panel asks the local server what's loaded and with what con
 
 Switching an agent to a model with a smaller context than its conversation triggers the same check before saving.
 
+The Servers page also has a **Headroom** setting (percent). With it on, sync writes a slightly smaller number than the server loaded, e.g. 5% → 65,792 becomes 62,464, so a token estimate that is a little off never overflows the server.
+
 ## Things it doesn't do
 
 - Run anything itself. It only edits OpenClaw's config (through `openclaw config patch`, so validation is OpenClaw's) and calls the model servers' own APIs.
