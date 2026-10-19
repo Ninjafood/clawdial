@@ -1478,10 +1478,76 @@ def sync_context_now():
     return True, {"loaded": loaded, "target": want, "active": active, "changed": changed, "unchanged": same, "skippedCopies": skipped}
 
 
+# ---------------------------------------------------------------- keep-warm
+
+KEEP_WARM_SLOW_S = 20  # a ping slower than this means the model had been paged out
+
+
+def keep_warm_cfg(st=None):
+    """Keep-warm settings from state.json: which providers to ping and how often (minutes)."""
+    kw = (st if st is not None else load_state()).get("keepWarm") or {}
+    try:
+        every = max(1, min(int(kw.get("everyMin", 5) or 5), 120))
+    except (TypeError, ValueError):
+        every = 5
+    return {"providers": sorted(p for p in (kw.get("providers") or []) if isinstance(p, str)), "everyMin": every}
+
+
+def keep_warm_ping(name, sv, cfg):
+    """One tiny completion against a provider so its loaded model stays resident. Runs in its own thread."""
+    base, key = provider_info(cfg, name)
+    configured = [m.get("id") for m in (cfg.get("models", {}).get("providers", {}).get(name, {}).get("models") or []) if m.get("id")]
+    model = sv.get("active") or (configured[0] if configured else None)
+    rec = CACHE.setdefault("keepWarm", {})
+    prev = rec.get(name) or {}
+    if not model:
+        rec[name] = {"at": time.time(), "ok": False, "secs": 0, "error": "no model to ping"}
+        return
+    start = time.time()
+    try:
+        http_json(base.rstrip("/") + "/chat/completions", "POST",
+                  {"model": model, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1, "stream": False}, key, 180)
+        ok, err = True, ""
+    except Exception as e:  # noqa: BLE001
+        ok, err = False, str(e)[:120]
+    secs = time.time() - start
+    rec[name] = {"at": time.time(), "ok": ok, "secs": round(secs, 1), "model": model, "error": err}
+    short = model.split("/")[-1]
+    if ok and secs >= KEEP_WARM_SLOW_S:
+        log_event("🔥 Keep-warm: %s took %.0f s to answer — %s had gone cold. Ping more often if this keeps happening." % (name, secs, short))
+    elif not ok and prev.get("ok", True):
+        log_event("❌ Keep-warm: %s didn't answer the ping — %s" % (name, err))
+    elif ok and prev.get("ok") is False:
+        log_event("🔥 Keep-warm: %s is answering again (%.1f s)" % (name, secs))
+
+
+def keep_warm_tick():
+    """Called from the poller: start a ping for each enabled provider whose interval has passed."""
+    st = load_state()
+    if st.get("paused"):
+        return
+    kw = keep_warm_cfg(st)
+    if not kw["providers"]:
+        return
+    cfg = oc_config()
+    rec = CACHE.setdefault("keepWarm", {})
+    now = time.time()
+    for sv in CACHE.get("servers") or []:
+        name = sv.get("provider")
+        if name not in kw["providers"] or sv.get("kind") == "runpod" or not sv.get("ok"):
+            continue  # serverless endpoints bill per request; a server that is down has nothing to keep warm
+        last = rec.get(name) or {}
+        if last.get("busy") or now - last.get("at", 0) < kw["everyMin"] * 60:
+            continue
+        rec[name] = {**last, "busy": True}
+        threading.Thread(target=keep_warm_ping, args=(name, sv, cfg), daemon=True).start()
+
+
 def poller_loop():
     while True:
         try:
             poll_once()
+            keep_warm_tick()
         except Exception as e:  # noqa: BLE001
             log_event("❌ poller error: %s" % e)
         time.sleep(15)
@@ -1760,6 +1826,7 @@ class Handler(BaseHTTPRequestHandler):
                                     "health": cached("health"), "polledAt": CACHE["at"],
                                     "paused": st.get("paused"), "schedules": st["schedules"], "lastRun": st["lastRun"], "log": st["log"][:100],
                                     "syncContext": st.get("syncContext", True), "contextHeadroomPct": st.get("contextHeadroomPct", 0),
+                                    "keepWarm": {**keep_warm_cfg(st), "last": CACHE.get("keepWarm") or {}},
                                     "midTurnPrecheck": bool((((cfg.get("agents") or {}).get("defaults") or {}).get("compaction") or {}).get("midTurnPrecheck", {}).get("enabled")),
                                     "sessions": SESS["data"]})
         if path == "/api/sessions":
@@ -1904,6 +1971,19 @@ class Handler(BaseHTTPRequestHandler):
                         st["contextHeadroomPct"] = max(0.0, min(float(b["contextHeadroomPct"] or 0), 50.0))
                     except (TypeError, ValueError):
                         return self._send(400, {"ok": False, "msg": "headroom must be a number of percent"})
+                if isinstance(b.get("keepWarm"), dict):
+                    k, kw = b["keepWarm"], keep_warm_cfg(st)
+                    if "everyMin" in k:
+                        try:
+                            kw["everyMin"] = max(1, min(int(k["everyMin"]), 120))
+                        except (TypeError, ValueError):
+                            return self._send(400, {"ok": False, "msg": "interval must be a number of minutes"})
+                    if k.get("provider"):
+                        provs = set(kw["providers"])
+                        (provs.add if k.get("on") else provs.discard)(str(k["provider"]))
+                        kw["providers"] = sorted(provs)
+                        CACHE.setdefault("keepWarm", {}).pop(str(k["provider"]), None)  # first ping on the next poll
+                    st["keepWarm"] = kw
                 write_json(STATE_FILE, st)
             if "midTurnPrecheck" in b:
                 if agents_busy() and not b.get("force"):
@@ -1915,9 +1995,13 @@ class Handler(BaseHTTPRequestHandler):
             if "contextHeadroomPct" in b:
                 log_event("⚙️ Context headroom: %s%%" % st["contextHeadroomPct"])
                 ok, info = sync_context_now()
+            elif isinstance(b.get("keepWarm"), dict):
+                kw = keep_warm_cfg(st)
+                log_event("🔥 Keep-warm: %s, every %d min" % ((", ".join(kw["providers"]) or "off"), kw["everyMin"]))
             else:
                 log_event("⚙️ Auto-sync desktop context: %s" % ("on" if st.get("syncContext", True) else "off"))
-            return self._send(200, {"ok": True, "syncContext": st.get("syncContext", True), "contextHeadroomPct": st.get("contextHeadroomPct", 0)})
+            return self._send(200, {"ok": True, "syncContext": st.get("syncContext", True), "contextHeadroomPct": st.get("contextHeadroomPct", 0),
+                                    "keepWarm": keep_warm_cfg(st)})
         if path == "/api/alias":
             ok, msg = add_alias(b.get("ref", ""), b.get("contextWindow") or 0, b.get("maxTokens"))
             return self._send(200 if ok else 400, {"ok": ok, "msg": msg})

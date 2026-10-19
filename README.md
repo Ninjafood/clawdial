@@ -28,6 +28,8 @@ So this panel does three things I'd been doing badly by hand:
 
 **Servers** — for each provider: what kind of server it is and whether it's up. Local servers get the full treatment: loaded model, loaded context, downloaded models, and (Unsloth) load a model with a memory check first. A one-click **Sync context** sets your OpenClaw entries to whatever the server loaded.
 
+**Keep warm** — a switch per model server on the Servers page. The panel sends a one-token request every few minutes (2–30, your pick) so the server never pages the loaded model out; without it the first message after a quiet spell can take a minute or more, and OpenClaw gives up on a reply at 90 s. The row shows how fast the last ping answered and flags one that came back slow (the model had gone cold — ping more often). Held while OpenClaw is paused; never offered for serverless endpoints that bill per request.
+
 **Schedules** — "big model overnight, small one by day" style rules, with a reason field so future-you knows why.
 
 **Health & Speed** — is everything up; time-to-first-word and tok/s per model.
