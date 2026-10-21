@@ -603,6 +603,12 @@ def set_heartbeat(b):
     return apply_patch({"agents": {"defaults": {"heartbeat": hb}}}, why)
 
 
+def qwen_thinking_model(model_id):
+    """Qwen3-family models that reason by default (the 2507 Instruct builds do not)."""
+    m = model_id.lower()
+    return ("qwen3" in m or "qwq" in m) and "instruct" not in m
+
+
 def desktop_catalog_entry(cfg, model_id):
     """Build a catalog entry for a model the local server has downloaded but OpenClaw doesn't know yet."""
     for m in (CACHE.get("unsloth") or {}).get("models", []):
@@ -610,8 +616,14 @@ def desktop_catalog_entry(cfg, model_id):
             us = CACHE.get("unsloth") or {}
             loaded = int(us.get("context") or 0) if us.get("active") == model_id else 0
             ctx = loaded or min(int(m.get("maxContext") or 32768), 131072)
-            return {"id": model_id, "name": "%s (desktop)" % model_id, "contextWindow": ctx, "maxTokens": 4096,
-                    "input": ["text"], "reasoning": False, "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}}
+            entry = {"id": model_id, "name": "%s (desktop)" % model_id, "contextWindow": ctx, "maxTokens": 4096,
+                     "input": ["text"], "reasoning": False, "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0}}
+            if qwen_thinking_model(model_id):
+                # Qwen3 thinks by default; without this, "thinking off" (compaction summaries) is ignored and
+                # compaction burns its whole output budget on reasoning, so long sessions end in context overflow.
+                entry["reasoning"] = True
+                entry["compat"] = {"thinkingFormat": "qwen-chat-template", "supportsUsageInStreaming": True}
+            return entry
     return None
 
 
