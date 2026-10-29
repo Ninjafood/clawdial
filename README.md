@@ -134,7 +134,7 @@ With that set, the panel takes the real client address from the proxy's `X-Forwa
 
 ## Security — read this bit
 
-`scripts/check-secrets.sh` scans the tree for keys, phone numbers, private IPs, tunnel hostnames and the like; add your own strings to `.secret-patterns` (one regex per line) and wire it up as a pre-commit hook so a leak never reaches a commit:
+`scripts/check-secrets.sh` scans the tree for keys, phone numbers, private IPs, tunnel hostnames and the like; add your own strings to a local `.secret-patterns` file (one regex per line; it is gitignored, because those patterns usually name the very things you want kept private) and wire it up as a pre-commit hook so a leak never reaches a commit:
 
 ```
 printf '#!/bin/sh\nexec bash "$(git rev-parse --show-toplevel)/scripts/check-secrets.sh"\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit

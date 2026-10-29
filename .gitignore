@@ -7,3 +7,6 @@ config.json
 __pycache__/
 .DS_Store
 docs/media/raw/
+
+# local-only extra scanner patterns (they name private hosts/keys, so never commit them)
+.secret-patterns
